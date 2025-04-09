@@ -1,19 +1,46 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from typing import Literal, Dict, List
+from typing import Optional, Any
 import json
 import os
 import redis
-from dataset.annotation import collect_annotations, DatasetMetadata, RLEAnnotationWithMaskPath, get_part_suffix
+from redis.cluster import RedisCluster
+from redis.exceptions import LockError
+import time
 import fcntl
+from dataset.annotation import collect_annotations, DatasetMetadata, RLEAnnotationWithMaskPath, get_part_suffix
 from render_mask import router as render_mask_router
 import logging
 import coloredlogs
 
 logger = logging.getLogger(__name__)
 coloredlogs.install(level='INFO')
+
+# Paths
+PARTONOMY_DIR = '/shared/nas2/blume5/fa24/concept_downloading/data/image_annotations/partonomy'
+DATA_DIR = '/shared/nas2/blume5/sp25/annotator/data'
+ANNOTATION_FILE = os.path.join(DATA_DIR, 'annotations.json')
+
+# Redis configuration
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
+REDIS_DB = 0
+
+# Redis lock timeout in seconds
+LOCK_TIMEOUT = 300  # 5 minutes
+LOCK_RETRY_TIMES = 3  # Number of times to retry acquiring a lock
+LOCK_RETRY_DELAY = 1  # Delay between retries in seconds
+LOCK_BLOCKING_TIMEOUT = 30  # 30 seconds
+
+# Redis keys
+ANNOTATION_STATE_KEY = 'annotation_state'
+IMAGE_QUEUE_KEY = 'image_queue'
+IMAGE_LOCK_PREFIX = 'lock:'
+IMAGE_ANNOTATED_PREFIX = 'annotated:'
+ANNOTATION_STATE_LOCK_KEY = 'annotation_state_lock'
+IMAGE_QUEUE_LOCK_KEY = 'image_queue_lock'
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,26 +63,32 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-PARTONOMY_DIR = '/shared/nas2/blume5/fa24/concept_downloading/data/image_annotations/partonomy'
-DATA_DIR = '/shared/nas2/blume5/sp25/annotator/data'
-ANNOTATION_FILE = os.path.join(DATA_DIR, 'annotations.json')
-
 # Redis client for concurrency-safe queueing
-r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-
-# Redis lock timeout in seconds
-LOCK_TIMEOUT = 300  # 5 minutes
-
-# Redis keys
-ANNOTATION_STATE_KEY = 'annotation_state'
-IMAGE_QUEUE_KEY = 'image_queue'
-IMAGE_LOCK_PREFIX = 'lock:'
-IMAGE_ANNOTATED_PREFIX = 'annotated:'
-ANNOTATION_STATE_LOCK_KEY = 'annotation_state_lock'
-IMAGE_QUEUE_LOCK_KEY = 'image_queue_lock'
+try:
+    # Try to use Redis Cluster for better locking support
+    r = RedisCluster(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
+        skip_full_coverage_check=True
+    )
+    logger.info("Connected to Redis Cluster")
+except Exception as e:
+    # Fall back to regular Redis if cluster is not available
+    logger.warning(f"Failed to connect to Redis Cluster: {e}. Falling back to regular Redis.")
+    r = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
+        decode_responses=True
+    )
 
 class AnnotationStateError(Exception):
     """Exception raised when there's an issue with the annotation state."""
+    pass
+
+class LockAcquisitionError(Exception):
+    """Exception raised when a lock cannot be acquired after retries."""
     pass
 
 class PartAnnotation(BaseModel):
@@ -107,14 +140,6 @@ def save_annotation_state(annotation_state: AnnotationState, to_file: bool = Tru
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Release lock
 
-def mark_image_as_annotated(image_path: str) -> None:
-    """Mark an image as annotated in Redis."""
-    r.set(f'{IMAGE_ANNOTATED_PREFIX}{image_path}', 1)
-
-def is_image_annotated(image_path: str) -> bool:
-    """Check if an image is already annotated."""
-    return r.exists(f'{IMAGE_ANNOTATED_PREFIX}{image_path}')
-
 def load_annotation_state():
     # Load annotations
     annotations: DatasetMetadata = collect_annotations(
@@ -158,17 +183,38 @@ def load_annotation_state():
     return annotation_state
 
 # Load image metadata into Redis queue (one-time initialization)
-@app.post('/api/initialize-queue')
 def initialize_queue(annotation_state: AnnotationState):
-    # Set up the image queue with unchecked images
-    try:
-        if not acquire_image_queue_lock():
-            return {"status": "error", "message": "Image queue is currently being initialized by another user"}
+    image_queue = list(annotation_state.unchecked.values())
+    r.set(IMAGE_QUEUE_KEY, json.dumps([img.model_dump() for img in image_queue]))
 
-        image_queue = list(annotation_state.unchecked.values())
-        r.set(IMAGE_QUEUE_KEY, json.dumps([img.model_dump() for img in image_queue]))
-    finally:
-        release_image_queue_lock()
+@app.post('/api/reload-queue')
+def reload_queue():
+    try:
+        queue_lock = acquire_image_queue_lock()
+        annotation_state_lock = acquire_annotation_state_lock()
+        if not queue_lock or not annotation_state_lock:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not obtain necessary locks. Please try again later."
+            )
+        try:
+            # Reload annotation state internally
+            annotation_state = get_annotation_state()
+            initialize_queue(annotation_state)
+            return {"status": "success", "message": "Image queue reloaded successfully"}
+        finally:
+            release_lock(queue_lock)
+            release_lock(annotation_state_lock)
+    except LockAcquisitionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
+    except AnnotationStateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @app.get('/api/next-image')
 def get_next_image():
@@ -178,49 +224,78 @@ def get_next_image():
         if image_json:
             image_data = json.loads(image_json)
             try:
-                acquire_image_lock(image_data["image_path"])
-                if not is_image_annotated(image_data["image_path"]):
-                    return image_data
-            finally:
-                release_image_lock(image_data["image_path"])
+                image_lock = acquire_image_lock(image_data["image_path"])
+                if not image_lock:
+                    # If we can't acquire the lock, skip this image and try the next one
+                    logger.warning(f"Could not acquire lock for image {image_data['image_path']}, skipping")
+                    continue
+
+                try:
+                    if not is_image_annotated(image_data["image_path"]):
+                        return image_data
+                finally:
+                    release_lock(image_lock)
+            except LockAcquisitionError:
+                # If we can't acquire the lock, skip this image and try the next one
+                logger.warning(f"Could not acquire lock for image {image_data['image_path']}, skipping")
+                continue
     return {}
 
 @app.post('/api/save-annotation')
 def save_annotation(annotation: ImageAnnotation):
     """Save an annotation with proper locking."""
     # First, try to acquire a lock for this specific image
-    if not acquire_image_lock(annotation.image_path):
-        return {"status": "error", "message": "Image annotation is currently being saved by another user"}
-
     try:
-        # Then, try to acquire a lock for the entire annotation state
-        if not acquire_annotation_state_lock():
-            return {"status": "error", "message": "Annotation state is currently being updated by another user"}
+        image_lock = acquire_image_lock(annotation.image_path)
+        if not image_lock:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Image annotation is currently being saved by another user"
+            )
 
         try:
-            # Get current annotation state
-            annotation_state = get_annotation_state()
+            # Then, try to acquire a lock for the entire annotation state
+            state_lock = acquire_annotation_state_lock()
+            if not state_lock:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Annotation state is currently being updated by another user"
+                )
 
-            # Move from unchecked to checked
-            if annotation.image_path in annotation_state.unchecked:
-                del annotation_state.unchecked[annotation.image_path]
+            try:
+                # Get current annotation state
+                annotation_state = get_annotation_state()
 
-            # Add to checked
-            annotation_state.checked[annotation.image_path] = annotation
+                # Move from unchecked to checked
+                if annotation.image_path in annotation_state.unchecked:
+                    del annotation_state.unchecked[annotation.image_path]
 
-            # Save updated state
-            save_annotation_state(annotation_state)
+                # Add to checked
+                annotation_state.checked[annotation.image_path] = annotation
 
-            # Mark image as annotated
-            mark_image_as_annotated(annotation.image_path)
+                # Save updated state
+                save_annotation_state(annotation_state)
 
-            return {'status': 'saved'}
+                # Mark image as annotated
+                mark_image_as_annotated(annotation.image_path)
+
+                return {'status': 'saved'}
+            finally:
+                # Always release the annotation state lock
+                release_lock(state_lock)
         finally:
-            # Always release the annotation state lock
-            release_annotation_state_lock()
-    finally:
-        # Always release the image lock
-        release_image_lock(annotation.image_path)
+            # Always release the image lock
+            release_lock(image_lock)
+    except LockAcquisitionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
+    except AnnotationStateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @app.get('/api/annotation-state')
 def get_annotation_state_endpoint():
@@ -229,7 +304,10 @@ def get_annotation_state_endpoint():
         annotation_state = get_annotation_state()
         return annotation_state.model_dump()
     except AnnotationStateError as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @app.get('/api/annotation-stats')
 def get_annotation_stats():
@@ -247,7 +325,10 @@ def get_annotation_stats():
             "progress_percentage": round((checked_count / total_count) * 100) if total_count > 0 else 0
         }
     except AnnotationStateError as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @app.get('/api/image-annotation/{image_path:path}')
 def get_image_annotation(image_path: str):
@@ -261,76 +342,209 @@ def get_image_annotation(image_path: str):
         elif image_path in annotation_state.unchecked:
             return annotation_state.unchecked[image_path].model_dump()
 
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Image annotation not found: {image_path}"
+        )
     except AnnotationStateError as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @app.post('/api/update-image-quality')
 def update_image_quality(update: ImageQualityUpdate):
     """Update the quality status of an image with proper locking."""
     # First, try to acquire a lock for this specific image
-    if not acquire_image_lock(update.image_path):
-        return {"status": "error", "message": "Image is currently being edited by another user"}
-
     try:
-        # Then, try to acquire a lock for the entire annotation state
-        if not acquire_annotation_state_lock():
-            return {"status": "error", "message": "Annotation state is currently being updated by another user"}
+        image_lock = acquire_image_lock(update.image_path)
+        if not image_lock:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Image is currently being edited by another user"
+            )
 
         try:
-            annotation_state = get_annotation_state()
+            # Then, try to acquire a lock for the entire annotation state
+            state_lock = acquire_annotation_state_lock()
+            if not state_lock:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Annotation state is currently being updated by another user"
+                )
 
-            # Find the image in either checked or unchecked
-            image_found = False
-            for state_dict in [annotation_state.checked, annotation_state.unchecked]:
-                if update.image_path in state_dict:
-                    image_annotation = state_dict[update.image_path]
-                    # Update all parts
-                    for part in image_annotation.parts:
-                        part.is_poor_quality = update.is_poor_quality
-                        part.is_incorrect = update.is_incorrect
-                        part.was_checked = True
-                    image_found = True
-                    break
+            try:
+                annotation_state = get_annotation_state()
 
-            if not image_found:
-                return {"status": "error", "message": f"Image {update.image_path} not found"}
+                # Find the image in either checked or unchecked
+                image_found = False
+                for state_dict in [annotation_state.checked, annotation_state.unchecked]:
+                    if update.image_path in state_dict:
+                        image_annotation = state_dict[update.image_path]
+                        # Update all parts
+                        for part in image_annotation.parts:
+                            part.is_poor_quality = update.is_poor_quality
+                            part.is_incorrect = update.is_incorrect
+                            part.was_checked = True
+                        image_found = True
+                        break
 
-            # Save updated state
-            save_annotation_state(annotation_state)
+                if not image_found:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Image not found: {update.image_path}"
+                    )
 
-            return {"status": "success"}
+                # Save updated state
+                save_annotation_state(annotation_state)
+
+                return {"status": "success"}
+            finally:
+                # Always release the annotation state lock
+                release_lock(state_lock)
         finally:
-            # Always release the annotation state lock
-            release_annotation_state_lock()
-    finally:
-        # Always release the image lock
-        release_image_lock(update.image_path)
+            # Always release the image lock
+            release_lock(image_lock)
+    except LockAcquisitionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
+    except AnnotationStateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
-def acquire_annotation_state_lock() -> bool:
-    """Try to acquire a lock for the annotation state. Returns True if successful."""
-    # Use Redis SETNX to atomically set the lock if it doesn't exist
-    return r.set(ANNOTATION_STATE_LOCK_KEY, 'locked', ex=LOCK_TIMEOUT, nx=True)
+def acquire_lock(lock_name: str, with_retry: bool = False, blocking: bool = True) -> Optional[Any]:
+    """
+    Acquire a Redis lock. If with_retry is True, the lock will be acquired with retry logic. If blocking is True, the lock will be acquired blocking until it is acquired.
+    Only one of with_retry or blocking can be True.
 
-def release_annotation_state_lock() -> None:
-    """Release the lock for the annotation state."""
-    r.delete(ANNOTATION_STATE_LOCK_KEY)
+    Args:
+        lock_name: The name of the lock to acquire
+        with_retry: Whether to retry acquiring the lock
+        blocking: Whether to block until the lock is acquired
 
-def acquire_image_lock(image_path: str) -> bool:
-    """Try to acquire a lock for an image. Returns True if successful."""
-    lock_key = f'{IMAGE_LOCK_PREFIX}{image_path}'
-    # Use Redis SETNX to atomically set the lock if it doesn't exist
-    return r.set(lock_key, 'locked', ex=LOCK_TIMEOUT, nx=True)
+    Returns:
+        The lock object if acquired, None otherwise
 
-def release_image_lock(image_path: str) -> None:
-    """Release the lock for an image."""
-    lock_key = f'{IMAGE_LOCK_PREFIX}{image_path}'
-    r.delete(lock_key)
+    Raises:
+        LockAcquisitionError: If the lock cannot be acquired after retries
+    """
+    assert with_retry ^ blocking, "with_retry and blocking must be mutually exclusive"
 
-def acquire_image_queue_lock() -> bool:
-    """Try to acquire a lock for the image queue. Returns True if successful."""
-    return r.set(IMAGE_QUEUE_LOCK_KEY, 'locked', ex=LOCK_TIMEOUT, nx=True)
+    if with_retry:
+        return acquire_lock_with_retry(lock_name)
+    else:
+        return acquire_lock_blocking(lock_name)
 
-def release_image_queue_lock() -> None:
-    """Release the lock for the image queue."""
-    r.delete(IMAGE_QUEUE_LOCK_KEY)
+def acquire_lock_blocking(lock_name: str, timeout: int = LOCK_TIMEOUT, blocking_timeout: int = LOCK_BLOCKING_TIMEOUT) -> Optional[Any]:
+    """Acquire a Redis lock blocking until it is acquired.
+
+    Args:
+        lock_name: The name of the lock to acquire
+        timeout: The timeout for the lock in seconds
+    """
+    try:
+        lock = r.lock(lock_name, timeout=timeout)
+        if lock.acquire(blocking=True, blocking_timeout=blocking_timeout):
+            return lock
+    except LockError as e:
+        logger.error(f"Error acquiring lock {lock_name}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error acquiring lock {lock_name}: {e}")
+        return None
+
+    raise LockAcquisitionError(f"Failed to acquire lock {lock_name} after {timeout} seconds")
+
+def acquire_lock_with_retry(lock_name: str, timeout: int = LOCK_TIMEOUT, retry_times: int = LOCK_RETRY_TIMES, retry_delay: float = LOCK_RETRY_DELAY) -> Optional[Any]:
+    """Acquire a Redis lock with retry logic.
+
+    Args:
+        lock_name: The name of the lock to acquire
+        timeout: The timeout for the lock in seconds
+        retry_times: The number of times to retry acquiring the lock
+        retry_delay: The delay between retries in seconds
+
+    Returns:
+        The lock object if acquired, None otherwise
+
+    Raises:
+        LockAcquisitionError: If the lock cannot be acquired after retries
+    """
+    for attempt in range(retry_times):
+        try:
+            # Try to acquire the lock
+            lock = r.lock(lock_name, timeout=timeout)
+            if lock.acquire(blocking=False):
+                logger.debug(f"Acquired lock {lock_name} on attempt {attempt + 1}")
+                return lock
+        except LockError as e:
+            logger.warning(f"Lock error on attempt {attempt + 1}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error acquiring lock {lock_name}: {e}")
+
+        # Wait before retrying
+        if attempt < retry_times - 1:
+            time.sleep(retry_delay)
+
+    # If we get here, we failed to acquire the lock after all retries
+    raise LockAcquisitionError(f"Failed to acquire lock {lock_name} after {retry_times} attempts")
+
+def release_lock(lock: Any) -> None:
+    """Release a Redis lock.
+
+    Args:
+        lock: The lock object to release
+    """
+    try:
+        lock.release()
+    except Exception as e:
+        logger.error(f"Error releasing lock: {e}")
+
+def acquire_annotation_state_lock() -> Optional[Any]:
+    """Try to acquire a lock for the annotation state with retry logic.
+
+    Returns:
+        The lock object if acquired, None otherwise
+
+    Raises:
+        LockAcquisitionError: If the lock cannot be acquired after retries
+    """
+    return acquire_lock(ANNOTATION_STATE_LOCK_KEY)
+
+def acquire_image_lock(image_path: str) -> Optional[Any]:
+    """Try to acquire a lock for an image with retry logic.
+
+    Args:
+        image_path: The path of the image to lock
+
+    Returns:
+        The lock object if acquired, None otherwise
+
+    Raises:
+        LockAcquisitionError: If the lock cannot be acquired after retries
+    """
+    lock_name = f'{IMAGE_LOCK_PREFIX}{image_path}'
+    return acquire_lock(lock_name)
+
+def acquire_image_queue_lock() -> Optional[Any]:
+    """Try to acquire a lock for the image queue with retry logic.
+
+    Returns:
+        The lock object if acquired, None otherwise
+
+    Raises:
+        LockAcquisitionError: If the lock cannot be acquired after retries
+    """
+    return acquire_lock(IMAGE_QUEUE_LOCK_KEY)
+
+def mark_image_as_annotated(image_path: str) -> None:
+    """Mark an image as annotated in Redis."""
+    r.set(f'{IMAGE_ANNOTATED_PREFIX}{image_path}', 1)
+
+def is_image_annotated(image_path: str) -> bool:
+    """Check if an image is already annotated."""
+    return r.exists(f'{IMAGE_ANNOTATED_PREFIX}{image_path}')
