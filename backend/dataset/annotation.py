@@ -24,6 +24,9 @@ class RLEAnnotation(TypedDict):
     image_path: str
     is_root_concept: bool
 
+class RLEAnnotationWithMaskPath(RLEAnnotation):
+    mask_path: str
+
 @dataclass
 class DatasetMetadata:
     img_dir: str
@@ -35,7 +38,8 @@ class DatasetMetadata:
     img_paths_by_label: dict[str,str]
     rle_paths_by_label: dict[str,str]
 
-    img_paths_to_rle_dicts: dict[str, dict[str, list[RLEAnnotation]]]
+    img_paths_to_rle_dicts: dict[str, dict[str, list[RLEAnnotationWithMaskPath]]]
+    object_label_to_part_labels: dict[str, list[str]]
 
 def collect_annotations(
     img_dir: str,
@@ -87,6 +91,7 @@ def collect_annotations(
     img_paths_by_label = defaultdict(set)
     rle_paths_by_label = defaultdict(list)
     img_paths_to_rle_dicts = defaultdict(dict)
+    object_label_to_part_labels = defaultdict(set)
 
     # Collect mask annotations
     logger.info('Collecting masks...')
@@ -104,12 +109,15 @@ def collect_annotations(
         label = label_from_path_fn(mask_path)
         if is_part_name(label):
             part_labels.add(label)
+            object_label_to_part_labels[get_object_prefix(label)].add(label)
         else:
             object_labels.add(label)
 
         image_path = rle_dict['image_path']
         img_paths_by_label[label].add(image_path)
         rle_paths_by_label[label].append(mask_path)
+
+        rle_dict['mask_path'] = mask_path # Add mask path to RLE dict
         img_paths_to_rle_dicts[image_path].setdefault(label, []).append(rle_dict)
 
     # Collect image paths
@@ -129,7 +137,8 @@ def collect_annotations(
         part_labels=sorted(part_labels),
         img_paths_by_label=img_paths_by_label,
         rle_paths_by_label=rle_paths_by_label,
-        img_paths_to_rle_dicts=img_paths_to_rle_dicts
+        img_paths_to_rle_dicts=img_paths_to_rle_dicts,
+        object_label_to_part_labels=object_label_to_part_labels
     )
 
 # %%
