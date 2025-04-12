@@ -55,7 +55,7 @@ def get_next_image():
                 image_lock = acquire_image_lock(image_data['image_path'])
                 if not image_lock:
                     # If we can't acquire the lock, skip this image and try the next one
-                    logger.warning(f'Could not acquire lock for image {image_data['image_path']}, skipping')
+                    logger.warning(f'Could not acquire lock for image {image_data["image_path"]}, skipping')
                     continue
 
                 try:
@@ -65,6 +65,6 @@ def get_next_image():
                     release_lock(image_lock)
             except LockAcquisitionError:
                 # If we can't acquire the lock, skip this image and try the next one
-                logger.warning(f'Could not acquire lock for image {image_data['image_path']}, skipping')
+                logger.warning(f'Could not acquire lock for image {image_data["image_path"]}, skipping')
                 continue
     return {}

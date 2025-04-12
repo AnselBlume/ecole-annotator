@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from services.image_queue import initialize_queue
-from services.annotator import load_annotation_state
+from services.annotator import load_annotation_state, save_annotation_state
 from routes.mask_rendering import router as render_mask_router
 from routes.image_queue import router as image_queue_router
 from routes.annotation import router as annotation_router
@@ -10,12 +10,13 @@ import logging
 import coloredlogs
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(level='INFO')
+coloredlogs.install(level='INFO', isatty=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     annotation_state = load_annotation_state()
+    save_annotation_state(annotation_state, to_file=False)
     initialize_queue(annotation_state)
     yield
     # Shutdown

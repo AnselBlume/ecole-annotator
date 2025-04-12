@@ -57,7 +57,8 @@ def load_annotation_state():
     # Load annotations
     annotations: DatasetMetadata = collect_annotations(
         os.path.join(PARTONOMY_DIR, 'images'),
-        os.path.join(PARTONOMY_DIR, 'masks')
+        os.path.join(PARTONOMY_DIR, 'masks'),
+        validate_rle_dicts=False
     )
 
     img_paths_to_rle_dicts = annotations.img_paths_to_rle_dicts

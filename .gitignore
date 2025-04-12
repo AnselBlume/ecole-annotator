@@ -1,3 +1,5 @@
 **/node_modules/**
 data
 __pycache__
+logs
+*.nfs*

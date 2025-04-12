@@ -5,11 +5,12 @@
 import json
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import TypedDict, Callable
+from typing import Callable
+from typing_extensions import TypedDict
 import os
 from tqdm import tqdm
 import logging, coloredlogs
-from ..utils import open_image, list_paths, label_from_directory
+from root_utils import open_image, list_paths, label_from_directory
 
 # Reexported for convenience
 from dataset.utils import is_part_name, get_part_suffix, get_object_prefix, get_category_name

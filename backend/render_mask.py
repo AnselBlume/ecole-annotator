@@ -11,7 +11,7 @@ import torch
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import pil_to_tensor, to_pil_image
 from torchvision.utils import draw_segmentation_masks
-from utils import open_image
+from root_utils import open_image
 
 logger = logging.getLogger(__name__)
 
