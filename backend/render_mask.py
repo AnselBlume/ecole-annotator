@@ -50,7 +50,6 @@ def get_combined_mask_image(image_path: str, part_names: List[str]) -> PILImage:
             continue
 
         masks = decode(part_annotation.rles) # (height, width, num_masks)
-        logger.info(f'masks has shape {masks.shape}. Expected shape (height, width, num_masks)')
         combined_mask = np.any(masks, axis=2) # (height, width)
         part_masks.append(combined_mask)
 
