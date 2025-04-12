@@ -87,10 +87,8 @@ def load_annotation_state():
         for img_path, label_to_rle_dicts in img_paths_to_rle_dicts.items():
             for label, rle_dicts in label_to_rle_dicts.items():
                 if label in part_labels: # Only validate part annotations, not objects
-                    unchecked[img_path] = ImageAnnotation(
-                        image_path=img_path,
-                        parts={label : PartAnnotation(name=label, rles=rle_dicts)}
-                    )
+                    annot: ImageAnnotation = unchecked.setdefault(img_path, ImageAnnotation(image_path=img_path, parts={}))
+                    annot.parts[label] = PartAnnotation(name=label, rles=rle_dicts)
 
         annotation_state = AnnotationState(checked=checked, unchecked=unchecked)
 
