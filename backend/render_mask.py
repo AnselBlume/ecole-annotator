@@ -44,7 +44,11 @@ def get_combined_mask_image(image_path: str, part_names: List[str]) -> PILImage:
         raise HTTPException(status_code=404, detail=f'Image annotation not found for {image_path}')
 
     part_masks = []
+    part_names = set(part_names)
     for part_name, part_annotation in annotation.parts.items():
+        if part_name not in part_names:
+            continue
+
         masks = decode(part_annotation.rles) # (height, width, num_masks)
         logger.info(f'masks has shape {masks.shape}. Expected shape (height, width, num_masks)')
         combined_mask = np.any(masks, axis=2) # (height, width)

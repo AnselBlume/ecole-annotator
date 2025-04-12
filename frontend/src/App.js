@@ -8,6 +8,7 @@ export default function SegmentationReviewApp() {
   const [activePart, setActivePart] = useState(null)
   const [qualityStatus, setQualityStatus] = useState({})
   const [stats, setStats] = useState(null)
+  const [isComplete, setIsComplete] = useState(false)
 
   const baseURL = process.env.REACT_APP_BACKEND
 
@@ -38,18 +39,18 @@ export default function SegmentationReviewApp() {
     Object.entries(data.parts).forEach(([name, part]) => {
       statusMap[name] = {
         is_poor_quality: part.is_poor_quality || false,
-        is_incorrect: part.is_incorrect || false,
+        is_correct: null
       }
     })
     setQualityStatus(statusMap)
   }
 
-  const toggleIncorrect = (partName) => {
+  const setCorrectStatus = (partName, isCorrect) => {
     setQualityStatus((prev) => ({
       ...prev,
       [partName]: {
         ...prev[partName],
-        is_incorrect: !prev[partName].is_incorrect,
+        is_correct: isCorrect,
       },
     }))
   }
@@ -60,6 +61,19 @@ export default function SegmentationReviewApp() {
       [partName]: {
         ...prev[partName],
         is_poor_quality: !prev[partName].is_poor_quality,
+        is_complete: prev[partName].is_complete,
+      },
+    }))
+  }
+
+  const toggleIncomplete = (partName) => {
+    setQualityStatus((prev) => ({
+      ...prev,
+      [partName]: {
+        ...prev[partName],
+        is_complete: !prev[partName].is_complete,
+        is_poor_quality: prev[partName].is_poor_quality,
+        is_correct: prev[partName].is_correct,
       },
     }))
   }
@@ -74,7 +88,8 @@ export default function SegmentationReviewApp() {
         ...part,
         was_checked: true,
         is_poor_quality: status.is_poor_quality,
-        is_incorrect: status.is_incorrect,
+        is_correct: status.is_correct,
+        is_complete: status.is_complete,
       }
     })
 
@@ -117,13 +132,16 @@ export default function SegmentationReviewApp() {
               <div
                 key={partName}
                 onClick={() => setActivePart(partName)}
-                className={`cursor-pointer px-3 py-2 rounded border text-sm ${
+                className={`cursor-pointer px-3 py-2 rounded border text-sm flex justify-between items-center ${
                   activePart === partName
                     ? "bg-accent text-accent-foreground"
                     : "hover:bg-muted"
                 }`}
               >
-                {partName}
+                <span>{partName}</span>
+                {(qualityStatus[partName]?.is_correct !== null) && (
+                  <span className="text-lg text-green-500 font-bold">✓</span>
+                )}
               </div>
             ))}
           </div>
@@ -152,25 +170,17 @@ export default function SegmentationReviewApp() {
 
                 <div className="flex gap-3 flex-wrap">
                   <Button
-                    variant={
-                      qualityStatus[activePart]?.is_incorrect
-                        ? "default"
-                        : "outline"
-                    }
-                    onClick={() => toggleIncorrect(activePart)}
+                    variant={qualityStatus[activePart]?.is_correct ? "outline" : "default"}
+                    onClick={() => setCorrectStatus(activePart, true)}
                   >
-                    Incorrect
+                    Correct
                   </Button>
 
                   <Button
-                    variant={
-                      !qualityStatus[activePart]?.is_incorrect
-                        ? "default"
-                        : "outline"
-                    }
-                    onClick={() => toggleIncorrect(activePart)}
+                    variant={!qualityStatus[activePart]?.is_correct ? "outline" : "default"}
+                    onClick={() => setCorrectStatus(activePart, false)}
                   >
-                    Correct
+                    Incorrect
                   </Button>
 
                   <label className="flex items-center gap-2">
@@ -181,6 +191,14 @@ export default function SegmentationReviewApp() {
                       onCheckedChange={() => togglePoorQuality(activePart)}
                     />
                     <span>Poor Quality</span>
+                  </label>
+
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={qualityStatus[activePart]?.is_complete || false}
+                      onCheckedChange={() => toggleIncomplete(activePart)}
+                    />
+                    <span>Incomplete</span>
                   </label>
                 </div>
               </div>

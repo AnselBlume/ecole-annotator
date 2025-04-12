@@ -6,8 +6,9 @@ class PartAnnotation(BaseModel):
     rles: list[RLEAnnotationWithMaskPath] = []
 
     was_checked: bool = False
+    is_correct: bool = True
     is_poor_quality: bool = False
-    is_incorrect: bool = False
+    is_complete: bool = True
 
 class ImageAnnotation(BaseModel):
     image_path: str
@@ -19,5 +20,6 @@ class AnnotationState(BaseModel):
 
 class ImageQualityUpdate(BaseModel):
     image_path: str
-    is_poor_quality: bool = False
-    is_incorrect: bool = False
+    is_complete: bool = None
+    is_poor_quality: bool = None
+    is_correct: bool = None
