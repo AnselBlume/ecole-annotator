@@ -5,3 +5,4 @@ logs
 *.nfs*
 frontend/.env.local
 /sam2
+*.log

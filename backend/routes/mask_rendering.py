@@ -12,11 +12,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def image_to_base64(image, format='PNG'):
-    """Convert PIL Image to base64 string"""
+    """Convert PIL Image to base64 string with optimized compression"""
     img_byte_arr = io.BytesIO()
-    image.save(img_byte_arr, format=format)
+
+    # Use PNG for binary masks as it's much better at compressing them
+    # Set compress_level to 3 (0-9 scale) for a balance of speed and size
+    if format.upper() == 'PNG':
+        image.save(img_byte_arr, format=format, compress_level=3)
+    elif format.upper() == 'JPEG':
+        # For JPEG, use quality=85 for good compression without visible artifacts
+        image.save(img_byte_arr, format=format, quality=85, optimize=True)
+    else:
+        # Default save with format-specific parameters
+        image.save(img_byte_arr, format=format)
+
     img_byte_arr.seek(0)
     img_bytes = img_byte_arr.getvalue()
+
+    # Log the size of the encoded image
+    logger.debug(f"Base64 encoding image, byte size: {len(img_bytes)}")
+
     return base64.b64encode(img_bytes).decode('utf-8')
 
 @router.get('/render-mask')
@@ -67,12 +82,12 @@ def render_mask_preview(
         overlay: Whether to overlay the mask on the original image
 
     Returns:
-        A streaming JPEG image response
+        A streaming PNG image response
     '''
     try:
         from pycocotools import mask as mask_utils
         import numpy as np
-        from PIL import Image
+        from PIL import Image, ImageDraw
         from root_utils import open_image
         import json
         from render_mask import image_from_masks
@@ -101,7 +116,7 @@ def render_mask_preview(
             logger.error(f"Failed to open base image {image_path}: {e}")
             # Return a placeholder error image
             error_img = Image.new('RGB', (400, 300), color=(255, 200, 200))
-            draw = Image.ImageDraw.Draw(error_img)
+            draw = ImageDraw.Draw(error_img)
             draw.text((20, 150), f"Error loading image: {str(e)[:50]}...", fill=(0, 0, 0))
             img_byte_arr = io.BytesIO()
             error_img.save(img_byte_arr, format='PNG')
@@ -119,58 +134,59 @@ def render_mask_preview(
                 rle_dict = json.loads(rle_data)
                 logger.info(f"RLE data keys: {list(rle_dict.keys()) if isinstance(rle_dict, dict) else 'not a dict'}")
 
-                # Ensure we have a proper dictionary with the right keys
-                if isinstance(rle_dict, dict) and 'counts' in rle_dict and 'size' in rle_dict:
-                    # Make a copy of the dict to avoid modifying the original
-                    rle_copy = dict(rle_dict)
-                    counts = rle_copy['counts']
+                # Validate that we have the required fields
+                if not isinstance(rle_dict, dict):
+                    raise ValueError("RLE data must be a dictionary")
 
-                    # Convert string counts to bytes if needed
-                    if isinstance(counts, str):
-                        rle_copy['counts'] = counts.encode('utf-8')
-                        logger.info("Converted RLE counts from string to bytes")
+                if 'counts' not in rle_dict:
+                    raise ValueError("Missing 'counts' field in RLE data")
 
-                    # Ensure size matches the image dimensions
-                    if not rle_copy['size'] or rle_copy['size'][0] != height or rle_copy['size'][1] != width:
-                        logger.warning(f"Adjusting RLE size to match image: {height}x{width}")
-                        rle_copy['size'] = [height, width]
+                if 'size' not in rle_dict:
+                    raise ValueError("Missing 'size' field in RLE data")
 
-                    # Decode the RLE
-                    try:
-                        mask = mask_utils.decode(rle_copy)
-                        mask_sum = np.sum(mask)
-                        logger.info(f"Successfully decoded RLE to mask with shape {mask.shape}, sum: {mask_sum}")
+                # Make a copy of the dict to avoid modifying the original
+                rle_copy = dict(rle_dict)
+                counts = rle_copy['counts']
 
-                        if mask_sum == 0:
-                            logger.warning("Decoded mask is empty (all zeros), adding test rectangle")
-                            # Add a test rectangle for visualization
-                            h, w = mask.shape
-                            center_h, center_w = h // 2, w // 2
-                            test_size = min(50, h//4, w//4)
-                            mask[center_h-test_size//2:center_h+test_size//2, center_w-test_size//2:center_w+test_size//2] = 1
-                    except Exception as e:
-                        logger.error(f"Failed to decode RLE: {e}")
-                        logger.error(traceback.format_exc())
-                else:
-                    logger.warning(f"Invalid RLE format or missing required keys")
+                # Convert string counts to bytes if needed
+                if isinstance(counts, str):
+                    rle_copy['counts'] = counts.encode('utf-8')
+                    logger.info("Converted RLE counts from string to bytes")
+                elif not isinstance(counts, bytes):
+                    raise ValueError(f"RLE counts must be string or bytes, got {type(counts)}")
+
+                # Ensure size format is valid
+                if not isinstance(rle_copy['size'], list) or len(rle_copy['size']) != 2:
+                    raise ValueError(f"RLE size must be a list with 2 elements, got {rle_copy['size']}")
+
+                # Optionally adjust size to match image dimensions
+                if rle_copy['size'][0] != height or rle_copy['size'][1] != width:
+                    logger.warning(f"Adjusting RLE size to match image: {height}x{width}")
+                    rle_copy['size'] = [height, width]
+
+                # Decode the RLE
+                try:
+                    mask = mask_utils.decode(rle_copy)
+                    mask_sum = np.sum(mask)
+                    logger.info(f"Successfully decoded RLE to mask with shape {mask.shape}, sum: {mask_sum}")
+                except Exception as e:
+                    logger.error(f"Failed to decode RLE: {e}")
+                    logger.error(traceback.format_exc())
+                    raise ValueError(f"Failed to decode RLE: {e}")
             except Exception as e:
-                logger.error(f"Failed to parse RLE data: {e}")
+                logger.error(f"Failed to process RLE data: {e}")
                 logger.error(traceback.format_exc())
+                # Create an error image
+                error_img = Image.new('RGB', (400, 300), color=(255, 200, 200))
+                draw = ImageDraw.Draw(error_img)
+                draw.text((20, 150), f"RLE error: {str(e)[:50]}...", fill=(0, 0, 0))
+                img_byte_arr = io.BytesIO()
+                error_img.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
+                return StreamingResponse(img_byte_arr, media_type='image/png')
 
         # Stack the mask to create the format expected by image_from_masks
-        # Convert binary mask to a stacked format (1, height, width)
         mask_stack = np.expand_dims(mask, axis=0)
-
-        # Check if mask has any content
-        if np.sum(mask) == 0:
-            logger.warning("Mask contains no positive pixels, setting a test pixel for debugging")
-            # For debugging, set a small rectangle in the center
-            h, w = mask.shape
-            center_h, center_w = h // 2, w // 2
-            size = 50  # Size of test rectangle
-            mask[center_h-size//2:center_h+size//2, center_w-size//2:center_w+size//2] = 1
-            mask_stack = np.expand_dims(mask, axis=0)
-
         logger.info(f"Mask stack shape: {mask_stack.shape}, max value: {np.max(mask_stack)}, sum: {np.sum(mask_stack)}")
 
         # Use image_from_masks to generate the mask image
@@ -200,41 +216,57 @@ def render_mask_preview(
             logger.error(f"Error in image_from_masks: {e}")
             logger.error(traceback.format_exc())
             # Create a basic error visualization
-            error_img = Image.new('RGB', (width, height), color=(255, 220, 220))
-            draw = Image.ImageDraw.Draw(error_img)
-            draw.text((width//2-100, height//2), f"Error: {str(e)[:100]}", fill=(0, 0, 0))
+            error_img = Image.new('RGB', (400, 300), color=(255, 220, 220))
+            draw = ImageDraw.Draw(error_img)
+            draw.text((20, 150), f"Error: {str(e)[:100]}", fill=(0, 0, 0))
             result_image = error_img
 
         # Convert to byte stream
         img_byte_arr = io.BytesIO()
 
-        # If result_image is a PIL Image, save directly
+        # Determine type of result_image and convert to PIL if needed
         if isinstance(result_image, Image.Image):
-            result_image.save(img_byte_arr, format='PNG', quality=100)
+            # Ensure the image is in RGB mode for consistent output
+            if result_image.mode != 'RGB':
+                result_image = result_image.convert('RGB')
+            # Save with optimized settings
+            result_image.save(img_byte_arr, format='PNG', compress_level=3)
             logger.info("Saved PIL Image to byte stream")
-        # If result_image is a PyTorch tensor or numpy array, convert to PIL first
         else:
             try:
-                from PIL import Image
-                from torchvision.transforms.functional import to_pil_image
-                import torch
+                # Convert numpy array or tensor to PIL image
+                pil_result = None
 
-                if isinstance(result_image, torch.Tensor):
-                    logger.info(f"Converting torch tensor to PIL image, tensor shape: {result_image.shape}")
-                    pil_result = to_pil_image(result_image)
-                else:  # numpy array
-                    logger.info(f"Converting numpy array to PIL image, array shape: {result_image.shape}")
-                    if result_image.ndim == 3 and result_image.shape[0] == 3:
-                        # If it's a 3-channel image with channels first (C, H, W)
-                        pil_result = Image.fromarray(result_image.transpose(1, 2, 0))
-                    elif result_image.ndim == 3:
-                        # If it's a 3-channel image with channels last (H, W, C)
-                        pil_result = Image.fromarray(result_image)
+                if hasattr(result_image, 'numpy') and callable(getattr(result_image, 'numpy')):
+                    # Handle PyTorch tensor
+                    result_array = result_image.numpy()
+                    if result_array.ndim == 3 and result_array.shape[0] == 3:
+                        # Channel-first format (C, H, W)
+                        pil_result = Image.fromarray((result_array.transpose(1, 2, 0) * 255).astype(np.uint8))
                     else:
-                        # For grayscale or binary images
-                        pil_result = Image.fromarray(result_image)
+                        # Other tensor formats
+                        pil_result = Image.fromarray((result_array * 255).astype(np.uint8))
+                elif isinstance(result_image, np.ndarray):
+                    # Handle numpy array
+                    if result_image.ndim == 3:
+                        if result_image.shape[0] == 3:
+                            # If it's a 3-channel image with channels first (C, H, W)
+                            pil_result = Image.fromarray((result_image.transpose(1, 2, 0) * 255).astype(np.uint8))
+                        else:
+                            # Assume channel-last format (H, W, C)
+                            pil_result = Image.fromarray((result_image * 255).astype(np.uint8))
+                    else:
+                        # For grayscale
+                        pil_result = Image.fromarray((result_image * 255).astype(np.uint8))
 
-                pil_result.save(img_byte_arr, format='PNG', quality=100)
+                if pil_result is None:
+                    raise ValueError(f"Unable to convert result_image of type {type(result_image)} to PIL Image")
+
+                # Ensure the image is in RGB mode
+                if pil_result.mode != 'RGB':
+                    pil_result = pil_result.convert('RGB')
+
+                pil_result.save(img_byte_arr, format='PNG', compress_level=3)
                 logger.info("Converted and saved tensor/array to byte stream")
             except Exception as conv_error:
                 logger.error(f"Error converting result to PIL image: {conv_error}")
@@ -242,7 +274,7 @@ def render_mask_preview(
 
                 # Create a simple error image as fallback
                 error_img = Image.new('RGB', (400, 300), color=(255, 180, 180))
-                draw = Image.ImageDraw.Draw(error_img)
+                draw = ImageDraw.Draw(error_img)
                 draw.text((20, 150), f"Error creating mask: {str(conv_error)[:50]}...", fill=(0, 0, 0))
                 error_img.save(img_byte_arr, format='PNG')
 
@@ -260,7 +292,7 @@ def render_mask_preview(
         # Return a placeholder error image
         try:
             error_img = Image.new('RGB', (400, 300), color=(255, 180, 180))
-            draw = Image.ImageDraw.Draw(error_img)
+            draw = ImageDraw.Draw(error_img)
             draw.text((20, 150), f"Error: {str(e)[:50]}...", fill=(0, 0, 0))
             img_byte_arr = io.BytesIO()
             error_img.save(img_byte_arr, format='PNG')
@@ -402,6 +434,7 @@ async def render_preview_base64(request_data: dict):
         from PIL import Image, ImageDraw
         from root_utils import open_image
         import json
+        import traceback
 
         image_path = request_data.get("image_path")
         rle_data = request_data.get("rle_data")
@@ -426,9 +459,8 @@ async def render_preview_base64(request_data: dict):
 
         # Debug the RLE data format
         logger.info(f"RLE data type: {type(rle_data)}")
-        logger.info(f"RLE data keys: {list(rle_data.keys()) if isinstance(rle_data, dict) else 'not a dict'}")
-        logger.info(f"RLE data content: {rle_data}")
 
+        # Handle string or dict RLE data
         if isinstance(rle_data, str):
             # Try to parse if it's a JSON string
             try:
@@ -443,7 +475,14 @@ async def render_preview_base64(request_data: dict):
                 )
         else:
             rle_dict = rle_data
-            logger.info(f"Using RLE data as-is: {list(rle_dict.keys()) if isinstance(rle_dict, dict) else 'not a dict'}")
+            if isinstance(rle_dict, dict):
+                logger.info(f"Using RLE dict with keys: {list(rle_dict.keys())}")
+            else:
+                logger.error(f"RLE data is not a dict: {type(rle_dict)}")
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "RLE data must be a dictionary or JSON string"}
+                )
 
         # Open the base image
         try:
@@ -468,35 +507,36 @@ async def render_preview_base64(request_data: dict):
 
         # Process RLE data
         try:
-            # Ensure we have a proper dictionary
-            if not isinstance(rle_dict, dict):
-                logger.error(f"RLE data is not a dictionary: {type(rle_dict)}")
-                raise ValueError("RLE data must be a dictionary")
-
+            # Validate required fields
             if 'counts' not in rle_dict:
                 logger.error(f"RLE data missing 'counts' field. Available keys: {list(rle_dict.keys())}")
                 raise ValueError("RLE data must contain 'counts' field")
 
+            if 'size' not in rle_dict:
+                logger.error(f"RLE data missing 'size' field. Available keys: {list(rle_dict.keys())}")
+                raise ValueError("RLE data must contain 'size' field")
+
             # Make a copy of the dict to avoid modifying the original
             rle_copy = dict(rle_dict)
 
-            # Debug the counts
+            # Handle the counts field
             counts = rle_copy['counts']
             if isinstance(counts, str):
-                logger.info(f"RLE counts is a string: {counts[:30]}...")
+                logger.info(f"Converting string RLE counts (length: {len(counts)}) to bytes")
                 rle_copy['counts'] = counts.encode('utf-8')
-                logger.info("Converted RLE counts from string to bytes")
-            elif isinstance(counts, bytes):
-                logger.info(f"RLE counts is already bytes, length: {len(counts)}")
-            else:
-                logger.warning(f"RLE counts is neither string nor bytes: {type(counts)}")
+            elif not isinstance(counts, bytes):
+                logger.error(f"RLE counts has invalid type: {type(counts)}")
+                raise ValueError(f"RLE counts must be string or bytes, not {type(counts)}")
 
             # Ensure size matches the image dimensions
-            if 'size' not in rle_copy or not rle_copy['size']:
-                rle_copy['size'] = [height, width]
-                logger.info(f"Setting RLE size to image dimensions: {height}x{width}")
-            elif rle_copy['size'][0] != height or rle_copy['size'][1] != width:
-                logger.warning(f"RLE size {rle_copy['size']} doesn't match image {height}x{width}. Adjusting.")
+            size = rle_copy['size']
+            if not isinstance(size, list) or len(size) != 2:
+                logger.error(f"Invalid size format: {size}")
+                raise ValueError(f"RLE size must be a list with 2 elements, not {size}")
+
+            # Optionally adjust size to match image dimensions
+            if size[0] != height or size[1] != width:
+                logger.warning(f"RLE size {size} doesn't match image {height}x{width}. Adjusting.")
                 rle_copy['size'] = [height, width]
 
             # Decode the RLE
@@ -505,33 +545,32 @@ async def render_preview_base64(request_data: dict):
                 mask = mask_utils.decode(rle_copy)
                 mask_sum = np.sum(mask)
                 logger.info(f"Successfully decoded RLE to mask with shape {mask.shape}, sum: {mask_sum}")
-
-                if mask_sum == 0:
-                    logger.warning("Decoded mask is empty (all zeros)")
-                    # For better visibility, add a small test rectangle
-                    h, w = mask.shape
-                    center_h, center_w = h // 2, w // 2
-                    test_size = 50
-                    mask[center_h-test_size//2:center_h+test_size//2, center_w-test_size//2:center_w+test_size//2] = 1
-                    logger.info("Added test rectangle to empty mask")
             except Exception as e:
                 logger.error(f"Failed to decode RLE: {e}")
                 logger.error(traceback.format_exc())
-                # Still continue with an empty mask
+                raise ValueError(f"Failed to decode RLE: {e}")
         except Exception as e:
             logger.error(f"Failed to process RLE data: {e}")
             logger.error(traceback.format_exc())
-            # Continue with the empty mask
+
+            # Return error image instead of continuing with empty mask
+            error_img = Image.new('RGB', (400, 300), color=(255, 200, 200))
+            draw = ImageDraw.Draw(error_img)
+            draw.text((20, 150), f"RLE processing error: {str(e)[:50]}...", fill=(0, 0, 0))
+            base64_img = image_to_base64(error_img)
+            return {
+                "success": False,
+                "error": f"Failed to process RLE data: {str(e)}",
+                "base64_image": f"data:image/png;base64,{base64_img}"
+            }
 
         # Stack the mask to create the format expected by image_from_masks
         mask_stack = np.expand_dims(mask, axis=0)
 
-        # Check if mask has any content
-        if np.sum(mask) == 0:
-            logger.warning("Final mask contains no positive pixels")
-
         # Use image_from_masks to generate the mask image
         try:
+            from render_mask import image_from_masks
+
             if overlay:
                 # Overlay on the original image with transparency
                 logger.info("Creating overlay with image_from_masks")
@@ -553,85 +592,76 @@ async def render_preview_base64(request_data: dict):
                 )
                 logger.info("Successfully created mask-only image")
 
-            logger.info(f"Result image type: {type(result_image)}")
-            if hasattr(result_image, 'shape'):
-                logger.info(f"Result image shape: {result_image.shape}")
-            elif hasattr(result_image, 'size'):
-                logger.info(f"Result image size: {result_image.size}")
-        except Exception as e:
-            logger.error(f"Error in image_from_masks: {e}")
-            logger.error(traceback.format_exc())
-            # Create a fallback image
-            error_img = Image.new('RGB', (width, height), color=(255, 200, 200))
-            draw = ImageDraw.Draw(error_img)
-            draw.text((width//2-100, height//2), f"Error rendering mask: {str(e)[:50]}...", fill=(0, 0, 0))
-            result_image = error_img
-
-        # Convert result to PIL Image if needed
-        try:
+            # Convert result to PIL Image if needed
             if not isinstance(result_image, Image.Image):
-                from torchvision.transforms.functional import to_pil_image
-                import torch
-
-                if isinstance(result_image, torch.Tensor):
-                    logger.info(f"Converting torch tensor to PIL image")
-                    result_image = to_pil_image(result_image)
-                else:  # numpy array
-                    logger.info(f"Converting numpy array to PIL image")
-                    if result_image.ndim == 3 and result_image.shape[0] == 3:
-                        # Channel-first format (C, H, W)
-                        result_image = Image.fromarray(result_image.transpose(1, 2, 0))
+                logger.info(f"Converting result of type {type(result_image)} to PIL Image")
+                if hasattr(result_image, 'numpy') and callable(getattr(result_image, 'numpy')):
+                    # Handle PyTorch tensor
+                    result_image = Image.fromarray(
+                        (result_image.numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
+                    )
+                elif isinstance(result_image, np.ndarray):
+                    # Handle numpy array
+                    if result_image.ndim == 3:
+                        if result_image.shape[0] == 3:
+                            # Channel-first format (C, H, W)
+                            result_image = Image.fromarray(
+                                (result_image.transpose(1, 2, 0) * 255).astype(np.uint8)
+                            )
+                        else:
+                            # Assume channel-last format (H, W, C)
+                            result_image = Image.fromarray(
+                                (result_image * 255).astype(np.uint8)
+                            )
                     else:
-                        result_image = Image.fromarray(result_image)
-        except Exception as e:
-            logger.error(f"Error converting result to PIL image: {e}")
-            logger.error(traceback.format_exc())
-            # Create a fallback image
-            error_img = Image.new('RGB', (width, height), color=(255, 200, 200))
-            draw = ImageDraw.Draw(error_img)
-            draw.text((width//2-100, height//2), f"Error converting image: {str(e)[:50]}...", fill=(0, 0, 0))
-            result_image = error_img
+                        # Grayscale
+                        result_image = Image.fromarray(
+                            (result_image * 255).astype(np.uint8)
+                        )
 
-        # Convert to base64
-        try:
-            base64_img = image_to_base64(result_image)
-            logger.info("Successfully created base64 preview image")
+            # Ensure result_image is RGB mode for consistent output
+            if result_image.mode != 'RGB':
+                logger.info(f"Converting image from mode {result_image.mode} to RGB")
+                result_image = result_image.convert('RGB')
+
+            # Convert to base64 with explicit format and compression parameters
+            logger.info("Converting result image to base64")
+            img_byte_arr = io.BytesIO()
+            result_image.save(img_byte_arr, format='PNG', compress_level=3)
+            img_byte_arr.seek(0)
+            base64_img = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            logger.info(f"Generated base64 image of length {len(base64_img)}")
 
             return {
                 "success": True,
                 "base64_image": f"data:image/png;base64,{base64_img}"
             }
+
         except Exception as e:
-            logger.error(f"Error converting image to base64: {e}")
+            logger.error(f"Error generating mask image: {e}")
             logger.error(traceback.format_exc())
 
-            # Last resort error handling
-            try:
-                error_img = Image.new('RGB', (400, 300), color=(255, 180, 180))
-                draw = ImageDraw.Draw(error_img)
-                draw.text((20, 150), f"Error creating base64: {str(e)[:50]}...", fill=(0, 0, 0))
-                base64_img = image_to_base64(error_img)
-
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "base64_image": f"data:image/png;base64,{base64_img}"
-                }
-            except:
-                return JSONResponse(
-                    status_code=500,
-                    content={"success": False, "error": f"Could not generate preview: {str(e)}"}
-                )
-
-    except Exception as e:
-        logger.error(f'Failed to generate base64 preview for {request_data.get("image_path")}: {e}')
-        logger.error(traceback.format_exc())
-
-        # Return error image
-        try:
+            # Return error image
             error_img = Image.new('RGB', (400, 300), color=(255, 180, 180))
             draw = ImageDraw.Draw(error_img)
             draw.text((20, 150), f"Error: {str(e)[:50]}...", fill=(0, 0, 0))
+            base64_img = image_to_base64(error_img)
+
+            return {
+                "success": False,
+                "error": f"Error generating mask image: {str(e)}",
+                "base64_image": f"data:image/png;base64,{base64_img}"
+            }
+
+    except Exception as e:
+        logger.error(f"Unexpected error in render_preview_base64: {e}")
+        logger.error(traceback.format_exc())
+
+        # Last resort error handling
+        try:
+            error_img = Image.new('RGB', (400, 300), color=(255, 180, 180))
+            draw = ImageDraw.Draw(error_img)
+            draw.text((20, 150), f"Unexpected error: {str(e)[:50]}...", fill=(0, 0, 0))
             base64_img = image_to_base64(error_img)
 
             return {
@@ -642,5 +672,5 @@ async def render_preview_base64(request_data: dict):
         except:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "error": f"Could not generate preview: {str(e)}"}
+                content={"success": False, "error": f"Failed to generate preview: {str(e)}"}
             )
