@@ -2,12 +2,15 @@ import { useState, useEffect } from "react"
 import { Card, CardContent } from "./components/ui/card"
 import { Button } from "./components/ui/button"
 import { Checkbox } from "./components/ui/checkbox"
+import { Header } from "./components/ui/header"
+import { Badge } from "./components/ui/badge"
 
 export default function SegmentationReviewApp() {
   const [imageData, setImageData] = useState(null)
   const [activePart, setActivePart] = useState(null)
   const [qualityStatus, setQualityStatus] = useState({})
   const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   const baseURL = process.env.REACT_APP_BACKEND
 
@@ -23,11 +26,13 @@ export default function SegmentationReviewApp() {
   }
 
   const fetchNextImage = async () => {
+    setLoading(true)
     const res = await fetch(`${baseURL}/queue/next-image`)
     const data = await res.json()
 
     if (!data?.image_path) {
       setImageData(null)
+      setLoading(false)
       return
     }
 
@@ -43,6 +48,7 @@ export default function SegmentationReviewApp() {
       }
     })
     setQualityStatus(statusMap)
+    setLoading(false)
   }
 
   const setCorrectStatus = (partName, isCorrect) => {
@@ -78,6 +84,7 @@ export default function SegmentationReviewApp() {
 
   const handleSave = async () => {
     if (!imageData) return
+    setLoading(true)
 
     const updatedParts = {}
     Object.entries(imageData.parts).forEach(([name, part]) => {
@@ -106,112 +113,163 @@ export default function SegmentationReviewApp() {
     fetchStats()
   }
 
-  if (!imageData) return <div className="p-4 text-lg">🎉 No more images to annotate.</div>
+  // Get current part status
+  const getPartStatus = (partName) => {
+    const status = qualityStatus[partName];
+    if (!status) return null;
+    if (status.is_correct === true) return "correct";
+    if (status.is_correct === false) return "incorrect";
+    return null;
+  }
 
-  const showMask =
-    activePart && imageData.parts[activePart]?.rles?.length > 0
+  const showMask = activePart && imageData?.parts[activePart]?.rles?.length > 0
+  const fileName = imageData?.image_path ? imageData.image_path.split('/').pop() : '';
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header stats={stats} />
+        <div className="flex items-center justify-center h-[80vh]">
+          <div className="text-xl font-medium text-gray-700">
+            Loading...
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!imageData) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header stats={stats} />
+        <div className="max-w-2xl mx-auto mt-20 text-center p-10 bg-white rounded-lg shadow-sm">
+          <div className="text-5xl mb-4">🎉</div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">All Done!</h2>
+          <p className="text-gray-600">No more images to annotate.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="p-4 space-y-4">
-      {stats && (
-        <Card>
-          <CardContent className="p-4 text-lg font-bold text-center">
-            Progress: {stats.checked_images} / {stats.total_images} images (
-            {stats.progress_percentage}%)
-          </CardContent>
-        </Card>
-      )}
+    <div className="min-h-screen bg-gray-50">
+      <Header stats={stats} />
 
-      <Card>
-        <CardContent className="grid md:grid-cols-[1fr,300px] gap-8 items-start flex flex-col justify-center items-center">
-          {/* 🖼️ Image on the left */}
-          <div className="flex flex-col gap-4 w-full max-w-[50%] p-4">
-            <div className="flex flex-row gap-10 w-full justify-center">
-              <div className="flex flex-col gap-6 max-w-[70%]">
-                {showMask && (
+      <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
+        <div className="mb-4">
+          <h2 className="text-lg font-medium text-gray-900">Current Image: <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{fileName}</span></h2>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr,300px] gap-6 p-6">
+            {/* Main image display area */}
+            <div className="flex flex-col items-center">
+              {showMask ? (
+                <div className="relative">
                   <img
                     src={`${baseURL}/mask/render-mask?image_path=${encodeURIComponent(
                       imageData.image_path
                     )}&parts=${encodeURIComponent(activePart)}`}
                     alt="Selected mask"
-                    className="max-w-full max-h-[500px] object-contain outline outline-5 outline-black"
+                    className="max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md"
                   />
-                )}
-
-                <div className="text-lg font-semibold text-center">{activePart}</div>
-
-                <div className="flex flex-row gap-3 flex-wrap justify-center items-center">
-                  <Button
-                    data-active={qualityStatus[activePart]?.is_correct === true}
-                    variant="outline"
-                    onClick={() => setCorrectStatus(activePart, true)}
-                    className="data-[active=true]:bg-green-100 data-[active=true]:border-green-600"
-                  >
-                    Correct
-                  </Button>
-
-                  <Button
-                    data-active={qualityStatus[activePart]?.is_correct === false}
-                    variant="outline"
-                    onClick={() => setCorrectStatus(activePart, false)}
-                    className="data-[active=true]:bg-red-100 data-[active=true]:border-red-600"
-                  >
-                    Incorrect
-                  </Button>
-
-                  <div className="flex flex-col gap-2">
-                    <label className="flex items-center gap-2">
-                      <Checkbox
-                        checked={qualityStatus[activePart]?.is_poor_quality || false}
-                        onCheckedChange={() => togglePoorQuality(activePart)}
-                      />
-                      <span>Poor Quality</span>
-                    </label>
-
-                    <label className="flex items-center gap-2">
-                      <Checkbox
-                        checked={!qualityStatus[activePart]?.is_complete || false}
-                        onCheckedChange={() =>
-                          toggleIncomplete(activePart)
-                        }
-                      />
-                      <span>Incomplete</span>
-                    </label>
+                  <div className="absolute top-2 left-2">
+                    <Badge variant="secondary" className="bg-white/90 shadow-sm border border-gray-200">
+                      {activePart.split("--part:")[1] || activePart}
+                    </Badge>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center justify-center h-[60vh] w-full text-gray-400 bg-gray-100 rounded-lg">
+                  No mask available for {activePart}
+                </div>
+              )}
 
-              {/* 🧩 Part buttons on the right */}
-              <div className="flex flex-col gap-2 max-w-[30%]">
-                {Object.keys(imageData.parts).map((partName) => (
-                  <button
-                    key={partName}
-                    onClick={() => setActivePart(partName)}
-                    data-active={activePart === partName}
-                    className="cursor-pointer text-left px-3 py-2 rounded border text-sm flex justify-between items-center data-[active=true]:bg-blue-100 data-[active=true]:border-blue-500 hover:bg-muted"
+              {/* Annotation controls */}
+              <div className="mt-6 w-full max-w-md">
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <Button
+                    onClick={() => setCorrectStatus(activePart, true)}
+                    variant="outline"
+                    className={`h-12 ${qualityStatus[activePart]?.is_correct === true
+                      ? "bg-green-50 border-green-500 text-green-700"
+                      : ""}`}
                   >
-                    <span>{partName.split("--part:")[1]}</span>
-                    {qualityStatus[partName]?.is_correct !== null && (
-                      <span className="text-lg text-green-500 font-bold">✓</span>
-                    )}
-                  </button>
-                ))}
+                    ✓ Correct
+                  </Button>
+                  <Button
+                    onClick={() => setCorrectStatus(activePart, false)}
+                    variant="outline"
+                    className={`h-12 ${qualityStatus[activePart]?.is_correct === false
+                      ? "bg-red-50 border-red-500 text-red-700"
+                      : ""}`}
+                  >
+                    ✗ Incorrect
+                  </Button>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-md space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-100 rounded">
+                    <Checkbox
+                      checked={qualityStatus[activePart]?.is_poor_quality || false}
+                      onCheckedChange={() => togglePoorQuality(activePart)}
+                    />
+                    <span>Poor Quality</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-100 rounded">
+                    <Checkbox
+                      checked={!qualityStatus[activePart]?.is_complete || false}
+                      onCheckedChange={() => toggleIncomplete(activePart)}
+                    />
+                    <span>Incomplete</span>
+                  </label>
+                </div>
               </div>
             </div>
 
-            {activePart && (
-              <div className="flex flex-col gap-2 w-full items-center">
-                <div className="flex w-full justify-end">
-                  <Button onClick={handleSave} className="mt-4">
-                    Save and Next
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
+            {/* Part selection sidebar */}
+            <div className="bg-gray-50 p-4 rounded-md">
+              <h3 className="font-medium text-gray-700 mb-3">Parts</h3>
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                {Object.keys(imageData.parts).map((partName) => {
+                  const status = getPartStatus(partName);
+                  return (
+                    <button
+                      key={partName}
+                      onClick={() => setActivePart(partName)}
+                      className={`w-full text-left px-3 py-3 rounded-md border flex items-center justify-between group hover:bg-gray-100 transition-colors
+                        ${activePart === partName ? 'bg-blue-50 border-blue-300' : 'border-gray-200'}
+                        ${status === "correct" ? 'bg-green-50 border-green-200' : ''}
+                        ${status === "incorrect" ? 'bg-red-50 border-red-200' : ''}
+                      `}
+                    >
+                      <span className="text-sm font-medium truncate">
+                        {partName.split("--part:")[1] || partName}
+                      </span>
 
-        </CardContent>
-      </Card>
+                      {status && (
+                        <span className={`${status === "correct" ? 'text-green-600' : 'text-red-600'}`}>
+                          {status === "correct" ? "✓" : "✗"}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6">
+                <Button
+                  onClick={handleSave}
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                >
+                  Save and Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }
