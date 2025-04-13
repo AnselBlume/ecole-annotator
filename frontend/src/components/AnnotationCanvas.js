@@ -54,13 +54,54 @@ export default function AnnotationCanvas({
     if (!imageUrl) return
 
     const canvas = canvasRef.current
+    if (!canvas) return
+
     const ctx = canvas.getContext("2d")
     const container = containerRef.current
+    if (!container) return
+
+    // Show loading state
+    setOriginalImageSize({ width: 0, height: 0 })
 
     const img = new Image()
-    img.src = imageUrl
+
+    // Add error handling for image loading
+    img.onerror = (error) => {
+      console.error(`Error loading image: ${imageUrl}`, error)
+
+      // Draw error message on canvas
+      if (canvas && ctx) {
+        const width = canvas.width = 400
+        const height = canvas.height = 300
+
+        // Clear canvas
+        ctx.fillStyle = '#ffeeee'
+        ctx.fillRect(0, 0, width, height)
+
+        // Display error message
+        ctx.fillStyle = '#cc0000'
+        ctx.font = '16px Arial'
+        ctx.textAlign = 'center'
+        ctx.fillText(`Error loading image`, width/2, height/2 - 20)
+        ctx.fillText(`URL: ${imageUrl.substring(0, 30)}...`, width/2, height/2 + 10)
+        ctx.fillText(`Try refreshing or check browser console for details`, width/2, height/2 + 40)
+      }
+    }
 
     img.onload = () => {
+      // Check if image has valid dimensions
+      if (img.width === 0 || img.height === 0) {
+        console.error(`Image loaded but has invalid dimensions: ${img.width}x${img.height}`)
+        img.onerror(new Error("Image has invalid dimensions"))
+        return
+      }
+
+      // For very large images, warn in console
+      const MAX_DIMENSION = 4000
+      if (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION) {
+        console.warn(`Very large image loaded: ${img.width}x${img.height}, this may cause performance issues`)
+      }
+
       // Save original image dimensions
       setOriginalImageSize({ width: img.width, height: img.height })
 
@@ -81,7 +122,33 @@ export default function AnnotationCanvas({
       setScale(newScale)
 
       // Draw image
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      try {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      } catch (e) {
+        console.error("Error drawing image on canvas:", e)
+
+        // Handle specific canvas limits
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+        const maxCanvasSize = isSafari ? 16384 : 32767 // Safari has lower canvas size limits
+
+        if (img.width > maxCanvasSize || img.height > maxCanvasSize) {
+          ctx.fillStyle = '#ffeeee'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.fillStyle = '#cc0000'
+          ctx.font = '14px Arial'
+          ctx.textAlign = 'center'
+          ctx.fillText(`Error: Image too large for canvas (${img.width}x${img.height})`, canvas.width/2, canvas.height/2 - 10)
+          ctx.fillText(`Browser canvas size limit: ${maxCanvasSize}px`, canvas.width/2, canvas.height/2 + 10)
+        }
+      }
+    }
+
+    // Set the image source to trigger loading
+    img.src = imageUrl
+
+    // Add cleanup to abort image loading if component unmounts
+    return () => {
+      img.src = ''
     }
   }, [imageUrl])
 

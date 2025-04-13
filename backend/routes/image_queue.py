@@ -1,4 +1,7 @@
+import os
 import json
+import base64
+from tqdm import tqdm
 from fastapi import HTTPException, status, APIRouter
 from services.image_queue import acquire_image_queue_lock, initialize_queue, IMAGE_QUEUE_KEY
 from services.annotator import (
@@ -6,9 +9,13 @@ from services.annotator import (
     AnnotationStateError,
     is_image_annotated,
     acquire_annotation_state_lock,
-    acquire_image_lock
+    acquire_image_lock,
+    save_annotation_state
 )
+from utils.image_utils import needs_resize, resize_image, resize_rle
 from services.redis_client import r, release_lock, LockAcquisitionError
+from services.annotator import DATA_DIR
+from model import ImageAnnotation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,7 +57,7 @@ def get_next_image():
     while r.llen(IMAGE_QUEUE_KEY) > 0:
         image_json = r.lpop(IMAGE_QUEUE_KEY)
         if image_json:
-            image_data = json.loads(image_json)
+            image_data: ImageAnnotation = json.loads(image_json)
             try:
                 image_lock = acquire_image_lock(image_data['image_path'])
                 if not image_lock:
@@ -59,8 +66,12 @@ def get_next_image():
                     continue
 
                 try:
-                    if not is_image_annotated(image_data['image_path']):
-                        return image_data
+                    if is_image_annotated(image_data['image_path']):
+                        continue
+
+                    image_data = _handle_resize(image_data)
+
+                    return image_data
                 finally:
                     release_lock(image_lock)
             except LockAcquisitionError:
@@ -68,3 +79,69 @@ def get_next_image():
                 logger.warning(f'Could not acquire lock for image {image_data["image_path"]}, skipping')
                 continue
     return {}
+
+def _handle_resize(image_data: ImageAnnotation):
+    # Note that this is really a dict of type ImageAnnotation
+    nr, image = needs_resize(image_data['image_path'])
+    if not nr:
+        return image_data
+
+    # Resize image and masks
+    logger.info(f"Resizing image of size {image.size}")
+    resized_image = resize_image(image)
+    logger.info(f"Resized image has size {resized_image.size}")
+    os.makedirs(os.path.join(DATA_DIR, 'resized_images'), exist_ok=True)
+
+    # Generate new path. B64 encode original path as suffix to basename to avoid possible collisions
+    basename = os.path.splitext(os.path.basename(image_data['image_path']))[0]
+    orig_encoded_path = base64.b64encode(image_data['image_path'].encode()).decode()
+    new_path = os.path.join(
+        DATA_DIR,
+        'resized_images',
+        f'{basename}_{orig_encoded_path}.jpg'
+    )
+    resized_image.save(new_path)
+    old_path = image_data['image_path']
+    image_data['image_path'] = new_path
+
+    # Resize masks
+    total_rles = sum(len(part.get('rles', [])) for part in image_data['parts'].values())
+    logger.info(f"Starting to resize {total_rles} masks")
+
+    rle_count = 0
+    prog_bar = tqdm(range(total_rles), desc="Resizing masks")
+    for part_name, part in image_data['parts'].items():
+
+        for i, rle in enumerate(part['rles']):
+            rle_count += 1
+            try:
+                rle_dict = resize_rle(rle)
+                rle['size'] = rle_dict['size']
+                rle['counts'] = rle_dict['counts']
+                rle['mask_path'] = None
+                prog_bar.update(1)
+            except Exception as e:
+                logger.error(f"Error resizing mask for part {part_name}, index {i}: {e}")
+
+    logger.info(f'Completed resizing all {rle_count} masks')
+
+    # Save updated image data to Redis
+    logger.info(f'Saving image data to Redis')
+    try:
+        annotation_state_lock = acquire_annotation_state_lock()
+        if not annotation_state_lock:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail='Could not obtain annotation state lock. Please try again later.'
+            )
+
+        annotation_state = get_annotation_state()
+        annotation_state.unchecked.pop(old_path)
+        annotation_state.unchecked[new_path] = image_data
+
+        save_annotation_state(annotation_state, to_file=False)
+
+    finally:
+        release_lock(annotation_state_lock)
+
+    return image_data

@@ -115,8 +115,6 @@ export default function SegmentationReviewApp() {
       parts: updatedParts,
     }
 
-    console.log("Saving annotation with payload:", JSON.stringify(payload, null, 2));
-
     try {
       const response = await fetch(`${baseURL}/annotate/save-annotation`, {
         method: "POST",

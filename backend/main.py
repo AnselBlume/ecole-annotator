@@ -2,30 +2,19 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-import logging
-import os
-import sys
 import time
 from pathlib import Path
-from fastapi.logger import logger as fastapi_logger
 from contextlib import asynccontextmanager
 from services.image_queue import initialize_queue
 from services.annotator import load_annotation_state, save_annotation_state
 from routes.mask_rendering import router as render_mask_router
 from routes.image_queue import router as image_queue_router
 from routes.annotation import router as annotation_router, get_sam2_predictor
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("annotator_app.log")
-    ]
-)
+import logging
+import coloredlogs
 
 logger = logging.getLogger(__name__)
+coloredlogs.install(level='DEBUG', isatty=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
