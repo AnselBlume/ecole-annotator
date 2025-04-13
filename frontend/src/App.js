@@ -4,6 +4,7 @@ import { Button } from "./components/ui/button"
 import { Checkbox } from "./components/ui/checkbox"
 import { Header } from "./components/ui/header"
 import { Badge } from "./components/ui/badge"
+import ModularAnnotationMode from "./components/ModularAnnotationMode"
 
 export default function SegmentationReviewApp() {
   const [imageData, setImageData] = useState(null)
@@ -11,6 +12,7 @@ export default function SegmentationReviewApp() {
   const [qualityStatus, setQualityStatus] = useState({})
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [isAnnotating, setIsAnnotating] = useState(false)
 
   const baseURL = process.env.REACT_APP_BACKEND
 
@@ -122,6 +124,33 @@ export default function SegmentationReviewApp() {
     return null;
   }
 
+  // Start annotation mode
+  const handleStartAnnotation = () => {
+    if (activePart) {
+      setIsAnnotating(true)
+    }
+  }
+
+  // Handle updated annotation
+  const handleUpdateAnnotation = (partName, annotationData) => {
+    // Update the image data with new RLEs
+    if (imageData && partName) {
+      setImageData(prevData => {
+        const updatedParts = { ...prevData.parts }
+        if (partName in updatedParts) {
+          updatedParts[partName] = {
+            ...updatedParts[partName],
+            ...(annotationData.rles && { rles: annotationData.rles })
+          }
+        }
+        return {
+          ...prevData,
+          parts: updatedParts
+        }
+      })
+    }
+  }
+
   const showMask = activePart && imageData?.parts[activePart]?.rles?.length > 0
   const fileName = imageData?.image_path ? imageData.image_path.split('/').pop() : '';
 
@@ -147,6 +176,27 @@ export default function SegmentationReviewApp() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">All Done!</h2>
           <p className="text-gray-600">No more images to annotate.</p>
         </div>
+      </div>
+    )
+  }
+
+  // If in annotation mode, show the annotation interface
+  if (isAnnotating && activePart) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header stats={stats} />
+        <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-medium text-gray-900">Current Image: <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{fileName}</span></h2>
+          </div>
+          <ModularAnnotationMode
+            imageData={imageData}
+            activePart={activePart}
+            baseURL={baseURL}
+            onUpdateAnnotation={handleUpdateAnnotation}
+            onCancel={() => setIsAnnotating(false)}
+          />
+        </main>
       </div>
     )
   }
@@ -224,6 +274,16 @@ export default function SegmentationReviewApp() {
                     />
                     <span>Incomplete</span>
                   </label>
+                </div>
+
+                <div className="mt-4">
+                  <Button
+                    variant="outline"
+                    className="w-full border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                    onClick={handleStartAnnotation}
+                  >
+                    {showMask ? "Re-annotate Part" : "Annotate Part"}
+                  </Button>
                 </div>
               </div>
             </div>

@@ -1,5 +1,3 @@
-import { Card, CardContent } from "./card"
-
 export function Header({ stats }) {
   return (
     <div className="bg-gradient-to-r from-blue-600 to-indigo-700 py-4 px-6 shadow-md">

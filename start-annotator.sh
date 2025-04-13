@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # === Config ===
+CUDA_DEVICE="0"
 CONDA_ENV_NAME="annotator"
 BACKEND_DIR="backend"
 FRONTEND_DIR="frontend"
@@ -46,7 +47,7 @@ echo "✅ Found frontend port: $FRONTEND_PORT"
 # === Launch backend ===
 echo "🚀 Starting FastAPI backend..."
 cd "$BACKEND_DIR" || exit 1
-uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --reload &
+CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --reload &
 BACKEND_PID=$!
 cd ..
 

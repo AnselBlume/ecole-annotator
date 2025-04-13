@@ -1,5 +1,10 @@
 from pydantic import BaseModel
 from dataset.annotation import RLEAnnotationWithMaskPath
+from typing import List, Optional
+
+class Point(BaseModel):
+    x: int
+    y: int
 
 class PartAnnotation(BaseModel):
     name: str
@@ -23,3 +28,14 @@ class ImageQualityUpdate(BaseModel):
     is_complete: bool = None
     is_poor_quality: bool = None
     is_correct: bool = None
+
+class PointPrompt(BaseModel):
+    image_path: str
+    part_name: str
+    positive_points: List[Point]
+    negative_points: List[Point] = []
+
+class PolygonPrompt(BaseModel):
+    image_path: str
+    part_name: str
+    polygon_points: List[Point]

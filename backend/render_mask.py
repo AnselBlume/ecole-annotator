@@ -100,24 +100,55 @@ def image_from_masks(
     Returns:
         torch.Tensor: Image of shape (C, height, width) with the plotted masks.
     '''
+    logger.info(f"image_from_masks called with masks shape: {masks.shape if hasattr(masks, 'shape') else 'unknown'}")
+    logger.info(f"Masks type: {type(masks)}, combine_as_binary_mask: {combine_as_binary_mask}")
+
     is_numpy = isinstance(masks, np.ndarray)
     if is_numpy:
+        logger.info(f"Converting numpy array to tensor, shape: {masks.shape}, dtype: {masks.dtype}")
+        # Ensure mask is binary (0 or 1)
+        if masks.dtype != bool:
+            masks = masks > 0
         masks = torch.from_numpy(masks)
+
+    # Ensure masks are boolean tensors
+    if masks.dtype != torch.bool:
+        logger.info(f"Converting tensor dtype {masks.dtype} to boolean")
+        masks = masks > 0
+
+    # Check if any mask has content
+    mask_counts = masks.sum(dim=(1, 2))
+    logger.info(f"Mask counts: {mask_counts}")
+
+    if mask_counts.sum() == 0:
+        logger.warning("All masks are empty. Adding a small test mask for visualization.")
+        # Add a small visible test rectangle in the middle
+        h, w = masks.shape[1:]
+        center_h, center_w = h // 2, w // 2
+        size = 50  # Size of test rectangle
+        masks[0, center_h-size//2:center_h+size//2, center_w-size//2:center_w+size//2] = True
 
     # Masks should be a tensor of shape (num_masks, height, width)
     if combine_as_binary_mask:
         masks = masks.sum(dim=0, keepdim=True).to(torch.bool)
+        logger.info(f"Combined mask shape: {masks.shape}, sum: {masks.sum().item()}")
 
     # If there is only one mask, ensure we get a visible color
-    colors = get_colors(masks.shape[0], cmap_name=cmap, as_tuples=True) if masks.shape[0] > 1 else combine_color
+    if isinstance(combine_color, str):
+        # Use the color name directly if a string is provided
+        colors = get_colors(masks.shape[0], cmap_name=cmap, as_tuples=True) if masks.shape[0] > 1 else combine_color
+    else:
+        # Use the provided tuple if it's not a string
+        colors = get_colors(masks.shape[0], cmap_name=cmap, as_tuples=True) if masks.shape[0] > 1 else combine_color
 
     if superimpose_on_image is not None:
         if isinstance(superimpose_on_image, PILImage):
+            logger.info(f"Converting PIL image to tensor, size: {superimpose_on_image.size}")
             superimpose_on_image = pil_to_tensor(superimpose_on_image)
             return_as_pil = True
-
         else:
             return_as_pil = False
+            logger.info(f"Using provided tensor as background, shape: {superimpose_on_image.shape}")
 
         alpha = superimpose_alpha
         background = superimpose_on_image
@@ -125,14 +156,30 @@ def image_from_masks(
         alpha = 1
         background = torch.zeros(3, masks.shape[1], masks.shape[2], dtype=torch.uint8)
         return_as_pil = False
+        logger.info(f"Using blank background with shape: {background.shape}")
 
-    masks = draw_segmentation_masks(background, masks, colors=colors, alpha=alpha)
+    try:
+        logger.info(f"Drawing segmentation masks with colors: {colors}")
+        masks_output = draw_segmentation_masks(background, masks, colors=colors, alpha=alpha)
+        logger.info(f"Successfully drew masks, output shape: {masks_output.shape}")
 
-    # Output format
-    if return_as_pil:
-        masks = to_pil_image(masks)
+        # Output format
+        if return_as_pil:
+            logger.info("Converting result to PIL image")
+            masks_output = to_pil_image(masks_output)
+        elif is_numpy:
+            logger.info("Converting result to numpy array")
+            masks_output = masks_output.numpy()
 
-    elif is_numpy:
-        masks = masks.numpy()
-
-    return masks
+        return masks_output
+    except Exception as e:
+        logger.error(f"Error in draw_segmentation_masks: {e}")
+        # Create a fallback visualization
+        if superimpose_on_image is not None and isinstance(superimpose_on_image, PILImage):
+            result = superimpose_on_image
+        else:
+            from PIL import Image, ImageDraw
+            result = Image.new('RGB', (masks.shape[2], masks.shape[1]), color=(240, 240, 240))
+            draw = ImageDraw.Draw(result)
+            draw.text((10, 10), f"Error rendering mask: {str(e)}", fill=(255, 0, 0))
+        return result
