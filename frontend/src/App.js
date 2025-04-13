@@ -341,11 +341,10 @@ export default function SegmentationReviewApp() {
 
                 <div className="mt-4">
                   <Button
-                    variant="outline"
-                    className="w-full border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
-                    onClick={handleStartAnnotation}
+                    onClick={handleSave}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
                   >
-                    {showMask ? "Re-annotate Part" : "Annotate Part"}
+                    Save and Next
                   </Button>
                 </div>
               </div>
@@ -361,6 +360,10 @@ export default function SegmentationReviewApp() {
                     <button
                       key={partName}
                       onClick={() => setActivePart(partName)}
+                      onDoubleClick={() => {
+                        setActivePart(partName);
+                        handleStartAnnotation();
+                      }}
                       className={`w-full text-left px-3 py-3 rounded-md border flex items-center justify-between group hover:bg-gray-100 transition-colors
                         ${activePart === partName ? 'bg-blue-50 border-blue-300' : 'border-gray-200'}
                         ${status === "correct" ? 'bg-green-50 border-green-200' : ''}
@@ -383,10 +386,11 @@ export default function SegmentationReviewApp() {
 
               <div className="mt-6">
                 <Button
-                  onClick={handleSave}
-                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  variant="outline"
+                  className="w-full border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                  onClick={handleStartAnnotation}
                 >
-                  Save and Next
+                  {showMask ? "Re-annotate Part" : "Annotate Part"}
                 </Button>
               </div>
             </div>

@@ -363,15 +363,25 @@ export default function ModularAnnotationMode({
       } else if (data.positivePoints && data.positivePoints.length > 0) {
         // Handle point prompts from SAM2
         console.log("Sending SAM2 point prompt for preview");
+
+        // Prepare the request payload
+        const payload = {
+          image_path: imageData.image_path,
+          part_name: activePart,
+          positive_points: data.positivePoints,
+          negative_points: data.negativePoints || []
+        };
+
+        // Add existing mask for improved prediction if available
+        if (masks[activeMaskIndex]?.rle) {
+          console.log("Including existing mask for improved prediction");
+          payload.mask_input = masks[activeMaskIndex].rle;
+        }
+
         const promptResult = await fetch(`${baseURL}/annotate/generate-mask-from-points`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            image_path: imageData.image_path,
-            part_name: activePart,
-            positive_points: data.positivePoints,
-            negative_points: data.negativePoints || []
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (promptResult.ok) {

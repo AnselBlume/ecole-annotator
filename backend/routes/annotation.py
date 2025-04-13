@@ -25,8 +25,9 @@ router = APIRouter()
 sam2_predictor = None
 SAM_MODEL_NAME = "facebook/sam2.1-hiera-base-plus"
 
-# User-specific image embedding cache
-# Format: { 'user_id': { 'image_path': {'embeddings': data, 'timestamp': time, 'size': (h,w)} } }
+# User-specific image embedding cache for SAM2
+# Format: { 'user_id': { 'image_path': {'embeddings': data, 'timestamp': time, 'size': (h,w), 'masks': {'part_name': {'mask': mask_data, 'logits': logits_data}} } } }
+# The 'masks' field caches the per-part most recent mask and logits for improved prediction
 # This will be cleaned up periodically to avoid memory leaks
 image_embedding_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
 CACHE_CLEANUP_INTERVAL = 3600  # seconds (1 hour)
@@ -114,21 +115,23 @@ def save_annotation(annotation: ImageAnnotation):
                 )
 
             try:
-                # Get current annotation state
                 annotation_state = get_annotation_state()
 
-                # Move from unchecked to checked
                 if annotation.image_path in annotation_state.unchecked:
                     del annotation_state.unchecked[annotation.image_path]
 
-                # Add to checked
                 annotation_state.checked[annotation.image_path] = annotation
 
-                # Save updated state
                 save_annotation_state(annotation_state)
-
-                # Mark image as annotated
                 mark_image_as_annotated(annotation.image_path)
+
+                # Clear any cached masks for this image across all users
+                # This ensures we don't use old mask data after saving
+                for user_id in image_embedding_cache:
+                    if annotation.image_path in image_embedding_cache[user_id]:
+                        if 'masks' in image_embedding_cache[user_id][annotation.image_path]:
+                            logger.info(f"Clearing cached masks for image {annotation.image_path} for user {user_id}")
+                            image_embedding_cache[user_id][annotation.image_path]['masks'] = {}
 
                 return {'status': 'saved'}
             finally:
@@ -408,7 +411,7 @@ def rle_to_dict(rle_annotation):
         raise
 
 @router.post('/generate-mask-from-points')
-async def generate_mask_from_points(prompt: PointPrompt):
+async def generate_mask_from_points(prompt: PointPrompt, request: Request):
     """
     Generate a mask using SAM2 from positive and negative point prompts.
     Returns RLE encoded mask.
@@ -422,6 +425,13 @@ async def generate_mask_from_points(prompt: PointPrompt):
         logger.info(f"Generate mask from points for image: {prompt.image_path}")
         logger.info(f"Positive points: {[(p.x, p.y) for p in prompt.positive_points]}")
         logger.info(f"Negative points: {[(p.x, p.y) for p in prompt.negative_points]}")
+
+        # Get user-specific identifier
+        user_id = get_user_id(request)
+        logger.info(f"Processing request for user: {user_id}")
+
+        # Make sure this user has their own clean cache for this image
+        ensure_clean_image_cache(user_id, prompt.image_path)
 
         # Get the predictor (initializes once)
         predictor = get_sam2_predictor()
@@ -449,12 +459,49 @@ async def generate_mask_from_points(prompt: PointPrompt):
 
         logger.info(f"Running prediction with {len(input_points)} points")
 
-        # Run prediction
-        masks, scores, _ = predictor.predict(
-            point_coords=input_points,
-            point_labels=input_labels,
-            multimask_output=True
-        )
+        # Run prediction with mask_input if available
+        if hasattr(prompt, 'mask_input') and prompt.mask_input and prompt.part_name:
+            # Try to get cached logits for this part
+            if user_id in image_embedding_cache and prompt.image_path in image_embedding_cache[user_id]:
+                user_cache = image_embedding_cache[user_id]
+                part_cache = user_cache[prompt.image_path].get('masks', {}).get(prompt.part_name, {})
+
+                # If we have logits for this part, use them
+                if 'logits' in part_cache:
+                    logger.info(f"Using cached logits for part: {prompt.part_name} for user: {user_id}")
+                    cached_logits = part_cache['logits']
+
+                    # Run prediction with the cached logits
+                    masks, scores, logits = predictor.predict(
+                        point_coords=input_points,
+                        point_labels=input_labels,
+                        mask_input=cached_logits[None, :, :],  # Add batch dimension
+                        multimask_output=True
+                    )
+                    logger.info(f"Prediction with cached logits complete")
+                else:
+                    logger.info(f"No cached logits found for part: {prompt.part_name}, running standard prediction")
+                    # Standard prediction without mask_input
+                    masks, scores, logits = predictor.predict(
+                        point_coords=input_points,
+                        point_labels=input_labels,
+                        multimask_output=True
+                    )
+            else:
+                logger.info(f"No cache found for user/image, running standard prediction")
+                # Standard prediction without mask_input
+                masks, scores, logits = predictor.predict(
+                    point_coords=input_points,
+                    point_labels=input_labels,
+                    multimask_output=True
+                )
+        else:
+            # Standard prediction without mask_input
+            masks, scores, logits = predictor.predict(
+                point_coords=input_points,
+                point_labels=input_labels,
+                multimask_output=True
+            )
 
         # Log prediction results
         logger.info(f"Got {len(masks)} masks with scores: {scores}")
@@ -462,9 +509,31 @@ async def generate_mask_from_points(prompt: PointPrompt):
         # Get best mask based on score
         mask_idx = np.argmax(scores)
         best_mask = masks[mask_idx]
+        best_logits = logits[mask_idx]
         logger.info(f"Selected mask {mask_idx} with score {scores[mask_idx]}")
         logger.info(f"Mask shape: {best_mask.shape}, type: {best_mask.dtype}")
+        logger.info(f"Logits shape: {best_logits.shape}")
         logger.info(f"Mask sum: {np.sum(best_mask)} (number of positive pixels)")
+
+        # Store mask and logits in cache if we have a part name
+        if prompt.part_name:
+            # Initialize user's cache if not exists
+            if user_id not in image_embedding_cache:
+                image_embedding_cache[user_id] = {}
+            if prompt.image_path not in image_embedding_cache[user_id]:
+                image_embedding_cache[user_id][prompt.image_path] = {
+                    'timestamp': time.time(),
+                    'masks': {}
+                }
+            if 'masks' not in image_embedding_cache[user_id][prompt.image_path]:
+                image_embedding_cache[user_id][prompt.image_path]['masks'] = {}
+
+            # Store both the mask and logits
+            image_embedding_cache[user_id][prompt.image_path]['masks'][prompt.part_name] = {
+                'mask': best_mask,
+                'logits': best_logits
+            }
+            logger.info(f"Cached mask and logits for part: {prompt.part_name} for user: {user_id}")
 
         # Convert to RLE
         fortran_mask = np.asfortranarray(best_mask.astype(np.uint8))
@@ -536,7 +605,7 @@ async def generate_mask_from_points(prompt: PointPrompt):
         )
 
 @router.post('/generate-mask-from-polygon')
-async def generate_mask_from_polygon(prompt: PolygonPrompt):
+async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
     """
     Generate a mask from polygon points.
     Returns RLE encoded mask.
@@ -550,6 +619,13 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt):
         # Log incoming request for debugging
         logger.info(f"Generate mask from polygon for image: {prompt.image_path}")
         logger.info(f"Polygon points: {[(p.x, p.y) for p in prompt.polygon_points]}")
+
+        # Get user-specific identifier
+        user_id = get_user_id(request)
+        logger.info(f"Processing polygon request for user: {user_id}")
+
+        # Make sure this user has their own clean cache for this image
+        ensure_clean_image_cache(user_id, prompt.image_path)
 
         # Open image to get dimensions
         image = np.array(open_image(prompt.image_path))
@@ -639,6 +715,25 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt):
             detail=f"Failed to generate mask: {str(e)}"
         )
 
+def ensure_clean_image_cache(user_id: str, image_path: str):
+    """
+    Ensure that when a user starts working on an image, they have a clean cache.
+    This prevents one user's previous masks from affecting another user.
+    """
+    # First check if the user exists in the cache
+    if user_id not in image_embedding_cache:
+        image_embedding_cache[user_id] = {}
+        logger.info(f"Created new cache entry for user: {user_id}")
+        return
+
+    # Check if this user has this image in their cache
+    if image_path not in image_embedding_cache[user_id]:
+        # User doesn't have this image cached yet, which is fine
+        return
+
+    # If the user already has this image cached, we're good - they're continuing their own work
+    logger.info(f"User {user_id} already has a cache for image {image_path}")
+
 @router.post('/preview-mask-from-points')
 async def preview_mask_from_points(prompt: PointPrompt, request: Request):
     """
@@ -668,6 +763,9 @@ async def preview_mask_from_points(prompt: PointPrompt, request: Request):
         # Get user-specific identifier
         user_id = get_user_id(request)
 
+        # Make sure this user has their own clean cache for this image
+        ensure_clean_image_cache(user_id, prompt.image_path)
+
         # Initialize user's cache if not exists
         if user_id not in image_embedding_cache:
             image_embedding_cache[user_id] = {}
@@ -690,7 +788,8 @@ async def preview_mask_from_points(prompt: PointPrompt, request: Request):
             # Store in cache with timestamp
             user_cache[prompt.image_path] = {
                 'original_size': original_size,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'masks': {}  # Initialize masks dictionary for this image
             }
 
             logger.info(f"Image embeddings computed for user {user_id}, image: {prompt.image_path}")
@@ -699,6 +798,10 @@ async def preview_mask_from_points(prompt: PointPrompt, request: Request):
             user_cache[prompt.image_path]['timestamp'] = time.time()
             original_size = user_cache[prompt.image_path]['original_size']
             logger.info(f"Reusing existing image embeddings for user {user_id}, image: {prompt.image_path}")
+
+            # Make sure we have a masks dictionary
+            if 'masks' not in user_cache[prompt.image_path]:
+                user_cache[prompt.image_path]['masks'] = {}
 
         # Convert points to format expected by SAM
         input_points = []
@@ -718,19 +821,48 @@ async def preview_mask_from_points(prompt: PointPrompt, request: Request):
 
         logger.info(f"Running SAM2 prediction with {len(input_points)} points")
 
-        # Run prediction
-        masks, scores, _ = predictor.predict(
-            point_coords=input_points,
-            point_labels=input_labels,
-            multimask_output=True
-        )
+        # Try to use cached logits for this part if available
+        cached_logits = None
+        if prompt.part_name and prompt.part_name in user_cache[prompt.image_path].get('masks', {}):
+            part_cache = user_cache[prompt.image_path]['masks'][prompt.part_name]
+            if 'logits' in part_cache:
+                cached_logits = part_cache['logits']
+                logger.info(f"Found cached logits for part: {prompt.part_name}")
+
+        # Run prediction with cached logits if available
+        if cached_logits is not None:
+            logger.info("Using cached logits for prediction")
+            masks, scores, logits = predictor.predict(
+                point_coords=input_points,
+                point_labels=input_labels,
+                mask_input=cached_logits[None, :, :],  # Add batch dimension
+                multimask_output=True
+            )
+        else:
+            # Standard prediction without mask_input
+            logger.info("Running standard prediction without mask_input")
+            masks, scores, logits = predictor.predict(
+                point_coords=input_points,
+                point_labels=input_labels,
+                multimask_output=True
+            )
 
         # Get best mask based on score
         mask_idx = np.argmax(scores)
         best_score = scores[mask_idx]
         best_mask = masks[mask_idx]
+        best_logits = logits[mask_idx]
 
         logger.info(f"Prediction complete. Best mask index: {mask_idx}, score: {best_score:.4f}, mask shape: {best_mask.shape}")
+        logger.info(f"Logits shape: {best_logits.shape}")
+
+        # Save this mask and logits to the cache if we have a part name
+        if prompt.part_name:
+            user_cache[prompt.image_path]['masks'][prompt.part_name] = {
+                'mask': best_mask,
+                'logits': best_logits
+            }
+            logger.info(f"Cached mask and logits for part: {prompt.part_name}")
 
         # Ensure the mask matches the original image size
         if original_size and best_mask.shape != original_size:
@@ -814,6 +946,10 @@ async def preview_mask_from_polygon(prompt: PolygonPrompt, request: Request):
 
         # Get user-specific identifier
         user_id = get_user_id(request)
+        logger.info(f"Processing polygon preview for user: {user_id}")
+
+        # Make sure this user has their own clean cache for this image
+        ensure_clean_image_cache(user_id, prompt.image_path)
 
         # Initialize user's cache if not exists
         if user_id not in image_embedding_cache:
@@ -830,7 +966,8 @@ async def preview_mask_from_polygon(prompt: PolygonPrompt, request: Request):
             # Store in cache with timestamp
             user_cache[prompt.image_path] = {
                 'original_size': (height, width),
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'masks': {}  # Initialize masks dictionary
             }
 
             logger.info(f"Image size computed for user {user_id}, image: {prompt.image_path}")
@@ -840,7 +977,11 @@ async def preview_mask_from_polygon(prompt: PolygonPrompt, request: Request):
             height, width = user_cache[prompt.image_path]['original_size']
             logger.info(f"Reusing existing image size for user {user_id}, image: {prompt.image_path}")
 
-        # Create empty mask
+            # Ensure we have a masks dictionary
+            if 'masks' not in user_cache[prompt.image_path]:
+                user_cache[prompt.image_path]['masks'] = {}
+
+        # Create empty mask for the polygon
         mask = np.zeros((height, width), dtype=np.uint8)
 
         # Convert points to format expected by cv2

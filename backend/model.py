@@ -34,6 +34,7 @@ class PointPrompt(BaseModel):
     part_name: str
     positive_points: List[Point]
     negative_points: List[Point] = []
+    mask_input: dict = None  # Optional: RLE encoded mask to improve prediction
 
 class PolygonPrompt(BaseModel):
     image_path: str
