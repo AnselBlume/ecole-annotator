@@ -674,3 +674,89 @@ async def render_preview_base64(request_data: dict):
                 status_code=500,
                 content={"success": False, "error": f"Failed to generate preview: {str(e)}"}
             )
+
+@router.post('/generate-from-polygon')
+async def generate_mask_from_polygon(request_data: dict):
+    '''
+    Generates a mask from a polygon and returns RLE data.
+
+    Args:
+        request_data: A dictionary containing:
+            - image_path: path to the base image
+            - points: List of [x, y] coordinates forming the polygon
+
+    Returns:
+        JSON with success status and RLE data for the mask
+    '''
+    try:
+        from pycocotools import mask as mask_utils
+        import numpy as np
+        from PIL import Image, ImageDraw
+        from root_utils import open_image
+
+        image_path = request_data.get("image_path")
+        points = request_data.get("points", [])
+
+        if not image_path:
+            logger.error("No image_path provided in generate_mask_from_polygon")
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "No image_path provided"}
+            )
+
+        if not points or len(points) < 3:
+            logger.error(f"Not enough points provided in generate_mask_from_polygon: {len(points) if points else 0}")
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "At least 3 points required to form a polygon"}
+            )
+
+        logger.info(f"Generating mask from polygon with {len(points)} points for {image_path}")
+
+        # Open the base image to get dimensions
+        try:
+            base_image = open_image(image_path)
+            width, height = base_image.size
+            logger.info(f"Successfully opened base image with dimensions {width}x{height}")
+        except Exception as e:
+            logger.error(f"Failed to open base image {image_path}: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": f"Failed to open image: {str(e)}"}
+            )
+
+        # Create a binary mask from the polygon
+        mask = Image.new('L', (width, height), 0)
+        draw = ImageDraw.Draw(mask)
+
+        # Convert points to tuple format for drawing
+        polygon_points = [(p[0], p[1]) for p in points]
+
+        # Draw the polygon as a filled shape
+        draw.polygon(polygon_points, fill=1)
+
+        # Convert to numpy array
+        mask_array = np.array(mask)
+
+        # Encode as RLE
+        rle = mask_utils.encode(np.asfortranarray(mask_array))
+
+        # Convert to Python-friendly format (convert bytes to string)
+        rle_for_json = {
+            'counts': rle['counts'].decode('utf-8') if isinstance(rle['counts'], bytes) else rle['counts'],
+            'size': rle['size'].tolist() if hasattr(rle['size'], 'tolist') else rle['size']
+        }
+
+        return {
+            "success": True,
+            "rle": rle_for_json
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating mask from polygon: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": f"Failed to generate mask: {str(e)}"}
+        )

@@ -368,6 +368,26 @@ export default function ModularAnnotationMode({
 
       if (data.polygonPoints && data.polygonPoints.length >= 3) {
         rle = await generatePolygonMask(data.polygonPoints);
+      } else if (data.positivePoints && data.positivePoints.length > 0) {
+        // Handle point prompts from SAM2
+        console.log("Sending SAM2 point prompt for preview");
+        const promptResult = await fetch(`${baseURL}/annotate/generate-mask-from-points`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_path: imageData.image_path,
+            part_name: activePart,
+            positive_points: data.positivePoints,
+            negative_points: data.negativePoints || []
+          }),
+        });
+
+        if (promptResult.ok) {
+          const result = await promptResult.json();
+          if (result.rle) {
+            rle = result.rle;
+          }
+        }
       } else if (data.sam_prompt !== undefined) {
         const promptResult = await fetch(`${baseURL}/mask/segment-sam`, {
           method: "POST",
