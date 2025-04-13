@@ -5,7 +5,7 @@
 import json
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Callable
+from typing import Callable, Optional
 from typing_extensions import TypedDict
 import os
 from tqdm import tqdm
@@ -26,7 +26,7 @@ class RLEAnnotation(TypedDict):
     is_root_concept: bool
 
 class RLEAnnotationWithMaskPath(RLEAnnotation):
-    mask_path: str
+    mask_path: Optional[str]
 
 @dataclass
 class DatasetMetadata:

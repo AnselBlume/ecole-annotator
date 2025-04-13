@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react"
-import { Card, CardContent } from "./components/ui/card"
 import { Button } from "./components/ui/button"
 import { Checkbox } from "./components/ui/checkbox"
 import { Header } from "./components/ui/header"
@@ -88,16 +87,27 @@ export default function SegmentationReviewApp() {
     if (!imageData) return
     setLoading(true)
 
+    // Log the original data for debugging
+    console.log("Original imageData:", JSON.stringify(imageData, null, 2));
+    console.log("Quality status:", JSON.stringify(qualityStatus, null, 2));
+
     const updatedParts = {}
     Object.entries(imageData.parts).forEach(([name, part]) => {
       const status = qualityStatus[name] || {}
-      updatedParts[name] = {
-        ...part,
+      console.log(`Part ${name}:`, part);
+
+      // Create a copy of the part to avoid modifying the original
+      const updatedPart = {
+        name: name,  // Make sure name is included
+        // Use existing RLEs or provide an empty array
+        rles: Array.isArray(part.rles) ? part.rles : [],
         was_checked: true,
-        is_poor_quality: status.is_poor_quality,
-        is_correct: status.is_correct,
-        is_complete: status.is_complete,
-      }
+        is_poor_quality: status.is_poor_quality || false,
+        is_correct: status.is_correct === null ? true : status.is_correct, // Default to true if null
+        is_complete: status.is_complete === undefined ? true : status.is_complete,
+      };
+
+      updatedParts[name] = updatedPart;
     })
 
     const payload = {
@@ -105,14 +115,30 @@ export default function SegmentationReviewApp() {
       parts: updatedParts,
     }
 
-    await fetch(`${baseURL}/annotate/save-annotation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
+    console.log("Saving annotation with payload:", JSON.stringify(payload, null, 2));
 
-    fetchNextImage()
-    fetchStats()
+    try {
+      const response = await fetch(`${baseURL}/annotate/save-annotation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        console.error(`Error saving annotation: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        console.error(`Error details: ${errorText}`);
+        return;
+      }
+
+      // Only fetch next image and stats if save was successful
+      fetchNextImage();
+      fetchStats();
+    } catch (error) {
+      console.error("Failed to save annotation:", error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Get current part status
@@ -219,9 +245,48 @@ export default function SegmentationReviewApp() {
                   <img
                     src={`${baseURL}/mask/render-mask?image_path=${encodeURIComponent(
                       imageData.image_path
-                    )}&parts=${encodeURIComponent(activePart)}`}
+                    )}&parts=${encodeURIComponent(activePart)}&timestamp=${Date.now()}`}
                     alt="Selected mask"
                     className="max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md"
+                    onError={(e) => {
+                      console.error("Error loading mask image");
+                      e.target.style.display = 'none';
+                      const parent = e.target.parentElement;
+                      if (parent) {
+                        // Create an error message element
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = "flex items-center justify-center h-[60vh] w-full text-red-400 bg-red-50 rounded-lg";
+                        errorDiv.innerHTML = `
+                          <div class="text-center">
+                            <div class="text-lg font-medium mb-2">Failed to load mask</div>
+                            <div class="text-sm">There was an error rendering the mask for ${activePart.split("--part:")[1] || activePart}</div>
+                            <div class="mt-4">
+                              <button class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600">
+                                Try Again
+                              </button>
+                            </div>
+                          </div>
+                        `;
+                        parent.appendChild(errorDiv);
+
+                        // Add click handler to the try again button
+                        const tryAgainButton = errorDiv.querySelector('button');
+                        if (tryAgainButton) {
+                          tryAgainButton.addEventListener('click', () => {
+                            // Force reload the image with a cache-busting parameter
+                            const newImg = document.createElement('img');
+                            newImg.src = `${baseURL}/mask/render-mask?image_path=${encodeURIComponent(
+                              imageData.image_path
+                            )}&parts=${encodeURIComponent(activePart)}&t=${Date.now()}`;
+                            newImg.alt = "Selected mask";
+                            newImg.className = "max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md";
+
+                            // Replace the error message with the new image
+                            parent.replaceChild(newImg, errorDiv);
+                          });
+                        }
+                      }
+                    }}
                   />
                   <div className="absolute top-2 left-2">
                     <Badge variant="secondary" className="bg-white/90 shadow-sm border border-gray-200">

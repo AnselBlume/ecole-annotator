@@ -23,7 +23,7 @@ export default function ModularAnnotationMode({
   const [error, setError] = useState(null)
   const [masks, setMasks] = useState([])
   const [activeMaskIndex, setActiveMaskIndex] = useState(0)
-  const [showExistingMasks, setShowExistingMasks] = useState(true)
+  const [pointsForMasks, setPointsForMasks] = useState({})
 
   // Use custom hook for preview handling
   const {
@@ -40,8 +40,8 @@ export default function ModularAnnotationMode({
 
   // Helper function to get mask URL with the correct parameters
   const getMaskUrl = useCallback((maskIndex) => {
-    return getUrlForMask(masks, maskIndex, activePart, showExistingMasks);
-  }, [getUrlForMask, masks, activePart, showExistingMasks]);
+    return getUrlForMask(masks, maskIndex, activePart);
+  }, [getUrlForMask, masks, activePart]);
 
   // Load existing masks on component mount - with proper dependencies
   useEffect(() => {
@@ -87,31 +87,6 @@ export default function ModularAnnotationMode({
       }]);
     }
   }, [imageData, activePart, updateMaskPreview]);
-
-  // Handle toggle of show existing masks with proper dependencies
-  useEffect(() => {
-    // Prevent infinite re-renders - only update when the toggle changes
-    if (masks.length > 0 && masks[activeMaskIndex]?.rle) {
-      console.log(`Show existing masks changed to: ${showExistingMasks}`);
-
-      // Add a timestamp to force re-render of the mask
-      const updatedMasks = [...masks];
-      updatedMasks[activeMaskIndex] = {
-        ...updatedMasks[activeMaskIndex],
-        timestamp: Date.now()
-      };
-
-      // Update without triggering another effect
-      setMasks(updatedMasks);
-
-      // Request a new preview after a short delay
-      const timer = setTimeout(() => {
-        updateMaskPreview(updatedMasks[activeMaskIndex].rle);
-      }, 100);
-
-      return () => clearTimeout(timer);
-    }
-  }, [showExistingMasks]); // Only depend on the toggle state
 
   // Handle point prompts
   const handleSavePoints = async (points) => {
@@ -215,6 +190,15 @@ export default function ModularAnnotationMode({
 
       console.log("Created clean RLE object:", cleanRle);
 
+      // Save points for this mask
+      setPointsForMasks(prev => ({
+        ...prev,
+        [activeMaskIndex]: {
+          positivePoints: points.positivePoints,
+          negativePoints: points.negativePoints
+        }
+      }));
+
       // Update the active mask
       const newMasks = [...masks];
       newMasks[activeMaskIndex] = {
@@ -274,6 +258,14 @@ export default function ModularAnnotationMode({
         counts: result.rle.counts,
         size: result.rle.size
       };
+
+      // Save points for this mask
+      setPointsForMasks(prev => ({
+        ...prev,
+        [activeMaskIndex]: {
+          polygonPoints: polygon.polygonPoints
+        }
+      }));
 
       // Update the mask list
       const newMasks = [...masks];
@@ -388,23 +380,26 @@ export default function ModularAnnotationMode({
             rle = result.rle;
           }
         }
-      } else if (data.sam_prompt !== undefined) {
-        const promptResult = await fetch(`${baseURL}/mask/segment-sam`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            image_path: imageData.image_path,
-            sam_prompt: data.sam_prompt,
-          }),
-        });
-
-        if (promptResult.ok) {
-          const result = await promptResult.json();
-          if (result.success && result.rle) {
-            rle = result.rle;
-          }
-        }
+      } else {
+        console.log("No points provided for preview");
       }
+      // else if (data.sam_prompt !== undefined) {
+      //   const promptResult = await fetch(`${baseURL}/mask/segment-sam`, {
+      //     method: "POST",
+      //     headers: { "Content-Type": "application/json" },
+      //     body: JSON.stringify({
+      //       image_path: imageData.image_path,
+      //       sam_prompt: data.sam_prompt,
+      //     }),
+      //   });
+
+      //   if (promptResult.ok) {
+      //     const result = await promptResult.json();
+      //     if (result.success && result.rle) {
+      //       rle = result.rle;
+      //     }
+      //   }
+      // }
 
       if (rle) {
         // Validate the RLE data
@@ -438,6 +433,18 @@ export default function ModularAnnotationMode({
     }
   };
 
+  // Handle mask selection change - load points for the selected mask
+  const handleMaskIndexChange = (newIndex) => {
+    setActiveMaskIndex(newIndex);
+
+    // Update the preview for the selected mask
+    if (masks[newIndex]?.rle) {
+      updateMaskPreview(masks[newIndex].rle);
+    } else {
+      clearPreview();
+    }
+  };
+
   // Save all masks to the backend
   const handleSaveAllMasks = async () => {
     setIsLoading(true);
@@ -454,10 +461,13 @@ export default function ModularAnnotationMode({
             return null;
           }
 
-          // Return only the essential RLE fields
+          // Return an RLE object with all required fields according to the backend's RLEAnnotation type
           return {
             counts: mask.rle.counts,
-            size: mask.rle.size
+            size: mask.rle.size,
+            image_path: imageData.image_path,
+            is_root_concept: activePart.includes("root"),
+            mask_path: null
           };
         })
         .filter(rle => rle !== null); // Remove any null entries from invalid RLEs
@@ -468,20 +478,20 @@ export default function ModularAnnotationMode({
         return;
       }
 
-      const requestPayload = {
-        image_path: imageData.image_path,
-        part_name: activePart,
-        annotation_data: {
-          rles: masksToSave
-        }
-      };
+      // Create URL with query parameters for image_path and part_name
+      const url = new URL(`${baseURL}/annotate/update-part-annotation`);
+      url.searchParams.append('image_path', imageData.image_path);
+      url.searchParams.append('part_name', activePart);
 
-      console.log("Saving masks with payload:", requestPayload);
+      // Log the exact data we're sending for debugging
+      const requestBody = { rles: masksToSave };
+      console.log("Saving part annotation with payload:", JSON.stringify(requestBody, null, 2));
 
-      const response = await fetch(`${baseURL}/annotate/update-part-annotation`, {
+      // Send the rles array in the request body as expected by the backend
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestPayload)
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -506,21 +516,6 @@ export default function ModularAnnotationMode({
     }
   };
 
-  // Create a simple MaskControls component
-  const MaskControls = () => (
-    <div className="flex items-center gap-2">
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={showExistingMasks}
-          onChange={() => setShowExistingMasks(!showExistingMasks)}
-          className="h-4 w-4"
-        />
-        Show existing masks
-      </label>
-    </div>
-  );
-
   // Original image URL
   const originalImageUrl = `${baseURL}/images/${encodeURIComponent(imageData.image_path)}`;
 
@@ -532,12 +527,6 @@ export default function ModularAnnotationMode({
         </h2>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="flex-1 flex items-center gap-2">
-              <MaskControls />
-            </div>
-          </div>
-
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
@@ -554,7 +543,7 @@ export default function ModularAnnotationMode({
       <MaskSelector
         masks={masks}
         activeMaskIndex={activeMaskIndex}
-        setActiveMaskIndex={setActiveMaskIndex}
+        setActiveMaskIndex={handleMaskIndexChange}
         setMasks={setMasks}
         onPreviewMask={updateMaskPreview}
         clearPreview={clearPreview}
@@ -588,6 +577,8 @@ export default function ModularAnnotationMode({
                 mode="point_prompt"
                 onSavePoints={handleSavePoints}
                 onPreviewMask={handlePreviewMask}
+                initialPositivePoints={pointsForMasks[activeMaskIndex]?.positivePoints || []}
+                initialNegativePoints={pointsForMasks[activeMaskIndex]?.negativePoints || []}
                 className="w-full"
               />
               <div className="mt-4 text-xs text-gray-500">
@@ -607,7 +598,6 @@ export default function ModularAnnotationMode({
               previewMaskUrl={previewMaskUrl}
               debugPreviewUrl={debugPreviewUrl}
               activeTab={activeTab}
-              showExistingMasks={showExistingMasks}
               getMaskUrl={getMaskUrl}
             />
           </div>
@@ -622,6 +612,7 @@ export default function ModularAnnotationMode({
                 mode="polygon"
                 onSavePolygon={handleSavePolygon}
                 onPreviewMask={handlePreviewMask}
+                initialPolygonPoints={pointsForMasks[activeMaskIndex]?.polygonPoints || []}
                 className="w-full"
               />
             </div>
@@ -636,7 +627,6 @@ export default function ModularAnnotationMode({
               previewMaskUrl={previewMaskUrl}
               debugPreviewUrl={debugPreviewUrl}
               activeTab={activeTab}
-              showExistingMasks={showExistingMasks}
               getMaskUrl={getMaskUrl}
             />
           </div>

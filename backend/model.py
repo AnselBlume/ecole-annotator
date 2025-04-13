@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from dataset.annotation import RLEAnnotationWithMaskPath
-from typing import List, Optional
+from typing import List
 
 class Point(BaseModel):
     x: int

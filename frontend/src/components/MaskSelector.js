@@ -122,7 +122,7 @@ export default function MaskSelector({
               }`}
               onClick={() => handleMaskChange(index, mask)}
             >
-              Mask {index + 1} {mask.isExisting && "📌"}
+              {mask.isExisting && "📌"} Mask {index + 1}
             </Button>
           ))}
           <Button

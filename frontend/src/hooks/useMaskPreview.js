@@ -110,21 +110,16 @@ export default function useMaskPreview(baseURL, imageData) {
   }, [baseURL, imageData, previewMaskUrl]);
 
   // Create URL for viewing masks
-  const getMaskUrl = useCallback((masks, activeMaskIndex, activePart, showExistingMasks) => {
+  const getMaskUrl = useCallback((masks, activeMaskIndex, activePart) => {
     if (activeMaskIndex === null || activeMaskIndex === undefined || !masks[activeMaskIndex]?.rle) {
       return null;
     }
 
-    // Generate a different URL based on whether we're showing existing masks
+    // Generate URL for the mask
     let url = `${baseURL}/mask/render-mask?image_path=${encodeURIComponent(imageData.image_path)}`;
 
-    if (showExistingMasks) {
-      url += `&parts=${encodeURIComponent(activePart)}`;
-    } else {
-      // If not showing existing masks, create a temporary part name
-      const tempPart = `temp_preview_${Date.now()}`;
-      url += `&parts=${tempPart}`;
-    }
+    // Always use activePart for the parts parameter
+    url += `&parts=${encodeURIComponent(activePart)}`;
 
     // Add timestamp to prevent caching
     const timestamp = masks[activeMaskIndex].timestamp || Date.now();

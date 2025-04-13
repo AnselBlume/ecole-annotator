@@ -379,41 +379,6 @@ def debug_render_test(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f'Debug test failed: {str(e)}')
 
-@router.get('/render-mask-base64')
-def render_mask_base64(
-    image_path: str = Query(...),
-    parts: str = Query(...)
-):
-    '''
-    Dynamically generates a mask image for the selected parts and returns it as base64.
-
-    Args:
-        image_path: path to the base image
-        parts: comma-separated list of part names
-
-    Returns:
-        JSON with base64-encoded image
-    '''
-    try:
-        part_list = parts.split(',')
-        logging.info(f'Rendering base64 mask for {image_path} with parts {part_list}')
-        mask_image: PILImage = get_combined_mask_image(image_path, part_list)
-
-        # Convert to base64
-        base64_image = image_to_base64(mask_image)
-
-        return {
-            "success": True,
-            "base64_image": f"data:image/png;base64,{base64_image}"
-        }
-
-    except Exception as e:
-        logging.error(f'Failed to generate base64 mask for {image_path} parts {parts}: {e}')
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": f"Could not generate mask: {str(e)}"}
-        )
-
 @router.post('/render-preview-base64')
 async def render_preview_base64(request_data: dict):
     '''

@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status, APIRouter, File, UploadFile, Depends
+from fastapi import HTTPException, status, APIRouter
 from model import ImageAnnotation, ImageQualityUpdate, PointPrompt, PolygonPrompt
 from services.annotator import (
     get_annotation_state,
@@ -10,7 +10,7 @@ from services.annotator import (
 )
 from services.redis_client import release_lock, LockAcquisitionError
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 import torch
 from root_utils import open_image

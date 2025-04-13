@@ -2,7 +2,8 @@ import { useRef, useEffect, useState } from "react"
 import { Button } from "./ui/button"
 
 const POINT_RADIUS = 3
-const POINT_HIGHLIGHT_RADIUS = 5
+const POINT_HIGHLIGHT_RADIUS = 3
+const CLICK_TOLERANCE = 5
 
 export default function AnnotationCanvas({
   imageUrl,
@@ -20,7 +21,6 @@ export default function AnnotationCanvas({
   const [positivePoints, setPositivePoints] = useState(initialPositivePoints)
   const [negativePoints, setNegativePoints] = useState(initialNegativePoints)
   const [polygonPoints, setPolygonPoints] = useState(initialPolygonPoints)
-  const [isDrawing, setIsDrawing] = useState(false)
   const [originalImageSize, setOriginalImageSize] = useState({ width: 0, height: 0 })
   const [scale, setScale] = useState(1)
   const [selectedPoint, setSelectedPoint] = useState(null)
@@ -30,6 +30,24 @@ export default function AnnotationCanvas({
 
   // Mode is either "point_prompt" or "polygon"
   const isPointPromptMode = mode === "point_prompt"
+
+  // Load initial points when they change (for mask switching)
+  useEffect(() => {
+    if (initialPositivePoints && initialPositivePoints.length > 0) {
+      console.log(`Loading ${initialPositivePoints.length} initial positive points`);
+      setPositivePoints(initialPositivePoints);
+    }
+
+    if (initialNegativePoints && initialNegativePoints.length > 0) {
+      console.log(`Loading ${initialNegativePoints.length} initial negative points`);
+      setNegativePoints(initialNegativePoints);
+    }
+
+    if (initialPolygonPoints && initialPolygonPoints.length > 0) {
+      console.log(`Loading ${initialPolygonPoints.length} initial polygon points`);
+      setPolygonPoints(initialPolygonPoints);
+    }
+  }, [initialPositivePoints, initialNegativePoints, initialPolygonPoints]);
 
   // Load image onto canvas
   useEffect(() => {
@@ -380,7 +398,7 @@ export default function AnnotationCanvas({
 
   // Find if a point is clicked
   const findClickedPoint = (x, y) => {
-    const threshold = 15 / scale // Threshold in original image coordinates
+    const threshold = CLICK_TOLERANCE / scale // Threshold in original image coordinates
 
     if (isPointPromptMode) {
       // Check positive points

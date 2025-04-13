@@ -10,7 +10,6 @@ export default function MaskPreview({
   previewMaskUrl,
   debugPreviewUrl,
   activeTab,
-  showExistingMasks,
   getMaskUrl
 }) {
   // Container and image styles
@@ -131,11 +130,6 @@ export default function MaskPreview({
            (activeTab === "polygon" && !previewMask) ? "Complete polygon to see preview" :
            "No preview available"}
         </p>
-        {masks[activeMaskIndex]?.isExisting && masks[activeMaskIndex]?.rle && (
-          <div className="mt-2 text-sm text-blue-500">
-            Click "Show existing masks" to see the existing annotation
-          </div>
-        )}
       </div>
     );
   };
