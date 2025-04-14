@@ -7,7 +7,7 @@ from typing import Tuple, Optional, Union, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def image_to_base64(image: Image.Image, format='PNG') -> str:
+def image_to_base64(image: Image.Image, format='JPEG') -> str:
     """Convert PIL Image to base64 string with optimized compression"""
     img_byte_arr = io.BytesIO()
 
@@ -16,8 +16,8 @@ def image_to_base64(image: Image.Image, format='PNG') -> str:
     if format.upper() == 'PNG':
         image.save(img_byte_arr, format=format, compress_level=3)
     elif format.upper() == 'JPEG':
-        # For JPEG, use quality=85 for good compression without visible artifacts
-        image.save(img_byte_arr, format=format, quality=85, optimize=True)
+        # For JPEG, use quality=90 for good compression without visible artifacts
+        image.save(img_byte_arr, format=format, quality=90, optimize=True)
     else:
         # Default save with format-specific parameters
         image.save(img_byte_arr, format=format)
@@ -30,7 +30,7 @@ def image_to_base64(image: Image.Image, format='PNG') -> str:
 
     return base64.b64encode(img_bytes).decode('utf-8')
 
-def pil_image_to_byte_stream(image: Image.Image, format='PNG', quality=None) -> io.BytesIO:
+def pil_image_to_byte_stream(image: Image.Image, format='JPEG', quality=None) -> io.BytesIO:
     """Convert PIL image to byte stream for streaming response"""
     img_byte_arr = io.BytesIO()
 

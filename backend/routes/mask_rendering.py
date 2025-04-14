@@ -49,7 +49,7 @@ def render_combined_mask(
         logging.info(f'Rendering mask for {image_path} with parts {part_list}')
         mask_image = get_combined_mask_image(image_path, part_list)
 
-        return image_response(mask_image, format='PNG')
+        return image_response(mask_image)
 
     except Exception as e:
         logging.error(f'Failed to generate mask for {image_path} parts {parts}: {e}')
@@ -71,7 +71,7 @@ def render_mask_preview(
         overlay: Whether to overlay the mask on the original image
 
     Returns:
-        A streaming PNG image response
+        A streaming JPEG image response
     '''
     try:
         # Log the incoming data for debugging
@@ -115,7 +115,7 @@ def render_mask_preview(
             return error_image_response(f"Error creating mask: {str(e)}")
 
         # Return the image
-        return image_response(result_image, format='PNG')
+        return image_response(result_image, format='JPEG')
 
     except Exception as e:
         logger.error(f'Failed to generate mask preview for {image_path}: {e}')
@@ -206,7 +206,7 @@ async def render_preview_base64(request_data: dict):
             # Return base64 image response
             return {
                 "success": True,
-                "base64_image": f"data:image/png;base64,{image_to_base64(result_image)}"
+                "base64_image": f"data:image/jpeg;base64,{image_to_base64(result_image)}"
             }
         except ValueError as e:
             return handle_request_error(e, "Failed to process RLE data")

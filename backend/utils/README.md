@@ -25,7 +25,7 @@ return error_response("Invalid input", status_code=400)
 return success_response({"data": result})
 
 # Return an image as a streaming response
-return image_response(pil_image, format='PNG')
+return image_response(pil_image, format='JPEG')
 ```
 
 ### Image Utilities

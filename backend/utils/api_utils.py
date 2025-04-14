@@ -8,7 +8,7 @@ from utils.image_utils import create_error_image, pil_image_to_byte_stream, imag
 
 logger = logging.getLogger(__name__)
 
-def error_image_response(message: str, format='PNG') -> StreamingResponse:
+def error_image_response(message: str, format='JPEG') -> StreamingResponse:
     """Create a streaming response with an error image"""
     error_img = create_error_image(message)
     img_byte_arr = pil_image_to_byte_stream(error_img, format)
@@ -26,7 +26,7 @@ def handle_request_error(e: Exception, error_message: str) -> Dict:
     return {
         "success": False,
         "error": f"{error_message}: {str(e)}",
-        "base64_image": f"data:image/png;base64,{base64_img}"
+        "base64_image": f"data:image/jpeg;base64,{base64_img}"
     }
 
 def success_response(data: Dict[str, Any] = None) -> Dict:
@@ -46,7 +46,7 @@ def error_response(message: str, status_code: int = 400) -> JSONResponse:
         }
     )
 
-def image_response(image: Image.Image, format: str = 'PNG') -> StreamingResponse:
+def image_response(image: Image.Image, format: str = 'JPEG') -> StreamingResponse:
     """Create a streaming response with the given image"""
     img_byte_arr = pil_image_to_byte_stream(image, format)
     return StreamingResponse(img_byte_arr, media_type=f'image/{format.lower()}')
@@ -57,7 +57,7 @@ def base64_image_response(image: Image.Image, include_data_uri: bool = True) -> 
     if include_data_uri:
         return {
             "success": True,
-            "base64_image": f"data:image/png;base64,{base64_img}"
+            "base64_image": f"data:image/jpeg;base64,{base64_img}"
         }
     return {
         "success": True,
