@@ -1,5 +1,30 @@
 #!/bin/bash
 
+# === Command-line options ===
+DEPLOY_MODE="host"  # Default to host mode (0.0.0.0)
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    --local)
+      DEPLOY_MODE="local"  # Local mode (127.0.0.1)
+      shift
+      ;;
+    --host)
+      DEPLOY_MODE="host"  # Host mode (0.0.0.0)
+      shift
+      ;;
+    *)
+      echo "Unknown option: $key"
+      echo "Usage: $0 [--local|--host]"
+      echo "  --local: Run on localhost only (127.0.0.1)"
+      echo "  --host: Run on all interfaces (0.0.0.0) - this is the default"
+      exit 1
+      ;;
+  esac
+done
+
 # === Config ===
 CUDA_DEVICE="0"
 CONDA_ENV_NAME="annotator"
@@ -8,6 +33,17 @@ FRONTEND_DIR="frontend"
 LOG_DIR="logs"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 LOG_FILE="$LOG_DIR/annotator_$TIMESTAMP.log"
+
+# Set host based on deploy mode
+if [ "$DEPLOY_MODE" = "local" ]; then
+  HOST="127.0.0.1"
+  HOSTNAME="localhost"
+else
+  HOST="0.0.0.0"
+  HOSTNAME=$(hostname -f)
+fi
+
+echo "🌐 Running in $DEPLOY_MODE mode (Host: $HOST, Hostname: $HOSTNAME)"
 
 # === Helper: find a free port ===
 find_free_port() {
@@ -40,7 +76,6 @@ fi
 # === Find free ports ===
 BACKEND_PORT=$(find_free_port)
 FRONTEND_PORT=3015
-HOST=0.0.0.0
 
 echo "✅ Found backend port: $BACKEND_PORT"
 echo "✅ Found frontend port: $FRONTEND_PORT"
@@ -48,16 +83,13 @@ echo "✅ Found frontend port: $FRONTEND_PORT"
 # === Launch backend ===
 echo "🚀 Starting FastAPI backend..."
 cd "$BACKEND_DIR" || exit 1
-# 127.0.0.1 == localhost, and this only works if we forward the port to the local machine. 0.0.0.0 == machine hostname
-# CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --reload &
 CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host $HOST --port $BACKEND_PORT --reload &
 BACKEND_PID=$!
 cd ..
 
 # === Write frontend .env file dynamically ===
 echo "🌐 Setting backend URL in frontend .env file..."
-# echo "REACT_APP_BACKEND=http://localhost:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
-echo "REACT_APP_BACKEND=http://blender13.cs.illinois.edu:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
+echo "REACT_APP_BACKEND=http://$HOSTNAME:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
 
 # === Launch frontend ===
 PUBLIC_URL=/partonomy-annotator
@@ -73,11 +105,15 @@ trap "echo '🛑 Shutting down...'; kill $BACKEND_PID $FRONTEND_PID $REDIS_PID; 
 
 echo ""
 echo "==========================================="
-echo "📡 Backend running at: http://localhost:$BACKEND_PORT"
-echo "🖼️ Frontend running at: http://localhost:$FRONTEND_PORT"
+echo "📡 Backend running at: http://$HOSTNAME:$BACKEND_PORT"
+echo "🖼️ Frontend running at: http://$HOSTNAME:$FRONTEND_PORT"
 echo ""
-echo "🔁 To view locally, use SSH tunnel:"
-echo "    ssh -N -L $BACKEND_PORT:localhost:$BACKEND_PORT -L $FRONTEND_PORT:localhost:$FRONTEND_PORT youruser@your.remote.server"
+if [ "$DEPLOY_MODE" = "host" ]; then
+  echo "🌍 Services accessible from: http://$HOSTNAME:$FRONTEND_PORT"
+else
+  echo "🔁 To view from other machines, use SSH tunnel:"
+  echo "    ssh -N -L $BACKEND_PORT:localhost:$BACKEND_PORT -L $FRONTEND_PORT:localhost:$FRONTEND_PORT youruser@$(hostname -f)"
+fi
 echo "==========================================="
 
 # Keep script running and logging
