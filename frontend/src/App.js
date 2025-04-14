@@ -150,6 +150,22 @@ export default function SegmentationReviewApp() {
     return null;
   }
 
+  // Skip the current image without saving
+  const handleSkip = async () => {
+    if (!imageData) return
+    setLoading(true)
+
+    try {
+      // Just fetch next image without saving
+      await fetchNextImage()
+      await fetchStats()
+    } catch (error) {
+      console.error("Failed to skip to next image:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Start annotation mode
   const handleStartAnnotation = () => {
     if (activePart) {
@@ -166,7 +182,10 @@ export default function SegmentationReviewApp() {
         if (partName in updatedParts) {
           updatedParts[partName] = {
             ...updatedParts[partName],
-            ...(annotationData.rles && { rles: annotationData.rles })
+            ...(annotationData.rles && {
+              rles: annotationData.rles,
+              has_existing_annotations: annotationData.rles.length > 0
+            })
           }
         }
         return {
@@ -361,10 +380,17 @@ export default function SegmentationReviewApp() {
                   </label>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <Button
+                    onClick={handleSkip}
+                    variant="outline"
+                    className="bg-gray-50 hover:bg-gray-100"
+                  >
+                    Skip
+                  </Button>
                   <Button
                     onClick={handleSave}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="bg-blue-600 hover:bg-blue-700"
                   >
                     Save and Next
                   </Button>
@@ -378,7 +404,8 @@ export default function SegmentationReviewApp() {
               <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
                 {Object.entries(imageData.parts).map(([partName, part]) => {
                   const status = getPartStatus(partName);
-                  const hasExistingAnnotations = part.has_existing_annotations !== false;
+                  // Check if there are actually any RLEs in the part
+                  const hasAnnotations = part.rles && part.rles.length > 0;
 
                   return (
                     <button
@@ -392,14 +419,14 @@ export default function SegmentationReviewApp() {
                         ${activePart === partName ? 'bg-blue-50 border-blue-300' : 'border-gray-200'}
                         ${status === "correct" ? 'bg-green-50 border-green-200' : ''}
                         ${status === "incorrect" ? 'bg-red-50 border-red-200' : ''}
-                        ${!hasExistingAnnotations ? 'border-dashed border-gray-300' : ''}
+                        ${!hasAnnotations ? 'border-dashed border-gray-300' : ''}
                       `}
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium truncate">
                           {partName.split("--part:")[1] || partName}
                         </span>
-                        {!hasExistingAnnotations && (
+                        {!hasAnnotations && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
                             No annotations
                           </span>
