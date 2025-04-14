@@ -100,8 +100,6 @@ def image_from_masks(
     Returns:
         torch.Tensor: Image of shape (C, height, width) with the plotted masks.
     '''
-    logger.debug(f"image_from_masks called with masks shape: {masks.shape if hasattr(masks, 'shape') else 'unknown'}")
-
     is_numpy = isinstance(masks, np.ndarray)
     if is_numpy:
         # Ensure mask is binary (0 or 1)
@@ -152,9 +150,7 @@ def image_from_masks(
         logger.debug(f"Using blank background with shape: {background.shape}")
 
     try:
-        logger.debug(f"Drawing segmentation masks with colors: {colors}")
         masks_output = draw_segmentation_masks(background, masks, colors=colors, alpha=alpha)
-        logger.debug(f"Successfully drew masks, output shape: {masks_output.shape}")
 
         # Output format
         if return_as_pil:

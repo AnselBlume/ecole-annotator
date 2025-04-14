@@ -371,13 +371,13 @@ export default function SegmentationReviewApp() {
                 <Button
                   onClick={handleSkip}
                   variant="outline"
-                  className="bg-gray-50 hover:bg-gray-100"
+                  className="bg-gray-50 hover:bg-gray-100 border-gray-300 text-gray-700 font-medium shadow-sm"
                 >
                   Skip
                 </Button>
                 <Button
                   onClick={handleSave}
-                  className="bg-blue-600 hover:bg-blue-700"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-md transition-all duration-200 ease-in-out border border-indigo-700 hover:shadow-lg"
                 >
                   Save and Next
                 </Button>
