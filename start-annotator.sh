@@ -39,7 +39,8 @@ fi
 
 # === Find free ports ===
 BACKEND_PORT=$(find_free_port)
-FRONTEND_PORT=$(find_free_port)
+FRONTEND_PORT=3015
+HOST=0.0.0.0
 
 echo "✅ Found backend port: $BACKEND_PORT"
 echo "✅ Found frontend port: $FRONTEND_PORT"
@@ -47,18 +48,23 @@ echo "✅ Found frontend port: $FRONTEND_PORT"
 # === Launch backend ===
 echo "🚀 Starting FastAPI backend..."
 cd "$BACKEND_DIR" || exit 1
-CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --reload &
+# 127.0.0.1 == localhost, and this only works if we forward the port to the local machine. 0.0.0.0 == machine hostname
+# CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --reload &
+CUDA_VISIBLE_DEVICES=$CUDA_DEVICE uvicorn main:app --host $HOST --port $BACKEND_PORT --reload &
 BACKEND_PID=$!
 cd ..
 
 # === Write frontend .env file dynamically ===
 echo "🌐 Setting backend URL in frontend .env file..."
-echo "REACT_APP_BACKEND=http://localhost:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
+# echo "REACT_APP_BACKEND=http://localhost:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
+echo "REACT_APP_BACKEND=http://blender13.cs.illinois.edu:$BACKEND_PORT" > "$FRONTEND_DIR/.env.local"
 
 # === Launch frontend ===
+PUBLIC_URL=/partonomy-annotator
+
 echo "🎨 Starting React frontend..."
 cd "$FRONTEND_DIR" || exit 1
-PORT=$FRONTEND_PORT npm start &
+PORT=$FRONTEND_PORT HOST=$HOST PUBLIC_URL=$PUBLIC_URL npm start &
 FRONTEND_PID=$!
 cd ..
 
