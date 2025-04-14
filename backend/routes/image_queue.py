@@ -10,7 +10,8 @@ from services.annotator import (
     is_image_annotated,
     acquire_annotation_state_lock,
     acquire_image_lock,
-    save_annotation_state
+    save_annotation_state,
+    image_path_to_part_labels
 )
 from utils.image_utils import needs_resize, resize_image, resize_rle
 from services.redis_client import r, release_lock, LockAcquisitionError
@@ -69,7 +70,33 @@ def get_next_image():
                     if is_image_annotated(image_data['image_path']):
                         continue
 
-                    image_data = _handle_resize(image_data)
+                    # Get object class from image path to find all possible parts
+                    try:
+                        all_possible_parts = image_path_to_part_labels(image_data['image_path'])
+                        logger.info(f'All possible parts for image {image_data["image_path"]}: {all_possible_parts}')
+
+                        # Add missing parts with empty RLEs
+                        from model import PartAnnotation
+                        for part_name in all_possible_parts:
+                            if part_name not in image_data['parts']:
+                                # Add placeholder for part with no existing annotations
+                                image_data['parts'][part_name] = {
+                                    'name': part_name,
+                                    'rles': [],
+                                    'was_checked': False,
+                                    'is_poor_quality': False,
+                                    'is_correct': None,
+                                    'is_complete': True,
+                                    'has_existing_annotations': False  # Flag to indicate this is a new part with no existing annotations
+                                }
+                            else:
+                                # Mark existing parts
+                                image_data['parts'][part_name]['has_existing_annotations'] = True
+                    except Exception as e:
+                        logger.warning(f"Error adding all possible parts: {e}")
+                        # Continue even if we can't add all parts
+
+                    image_data = _handle_resize(image_data) # This overwrites the 'parts' and 'image_path' fields
 
                     return image_data
                 finally:

@@ -109,6 +109,30 @@ def get_annotation_stats():
             detail=str(e)
         )
 
+@router.get('/object-parts')
+def get_object_parts(object_label: str = None):
+    '''Get all possible parts for an object label or all object-part mappings.'''
+    try:
+        import json
+        from services.annotator import r, OBJECT_LABEL_TO_PARTS_KEY
+
+        object_label_to_parts = json.loads(r.get(OBJECT_LABEL_TO_PARTS_KEY) or '{}')
+
+        if object_label:
+            return {
+                'parts': object_label_to_parts.get(object_label, [])
+            }
+        else:
+            return {
+                'object_label_to_parts': object_label_to_parts
+            }
+    except Exception as e:
+        logger.error(f"Error getting object parts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get object parts: {str(e)}"
+        )
+
 @router.get('/image-annotation/{image_path:path}')
 def get_image_annotation(image_path: str):
     '''Get a specific image annotation by its path.'''

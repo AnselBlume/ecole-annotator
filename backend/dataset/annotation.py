@@ -144,6 +144,7 @@ def collect_annotations(
 
 # %%
 if __name__ == '__main__':
+    import coloredlogs
     coloredlogs.install(level='WARNING')
     annotations_root = '/shared/nas2/blume5/fa24/concept_downloading/data/image_annotations/partonomy'
     # annotations_root = '/Users/Ansel/Desktop/24-11-18/annotations/merged_annotations'

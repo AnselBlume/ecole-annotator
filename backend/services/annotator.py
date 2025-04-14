@@ -1,4 +1,5 @@
 from model import AnnotationState
+from collections import defaultdict
 from dataset.annotation import collect_annotations, DatasetMetadata
 import os
 import json
@@ -7,6 +8,7 @@ from typing import Any, Optional
 from services.redis_client import r, acquire_lock
 import logging
 from model import PartAnnotation, ImageAnnotation
+from dataset.utils import is_part_name
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,9 @@ ANNOTATION_STATE_KEY = 'annotation_state'
 IMAGE_ANNOTATED_PREFIX = 'annotated:'
 ANNOTATION_STATE_LOCK_KEY = 'annotation_state_lock'
 IMAGE_LOCK_PREFIX = 'lock:'
+
+_img_path_to_label = None
+_object_label_to_parts = None
 
 class AnnotationStateError(Exception):
     '''Exception raised when there's an issue with the annotation state.'''
@@ -62,15 +67,18 @@ def load_annotation_state():
     )
 
     img_paths_to_rle_dicts = annotations.img_paths_to_rle_dicts
-    r.set('img_paths_to_rle_dicts', json.dumps(img_paths_to_rle_dicts))
     part_labels = set(annotations.part_labels)
 
-    img_path_to_label = {
+    # Need mapping from image label to obejct label to display on annotator interface
+    global _img_path_to_label, _object_label_to_parts
+    _img_path_to_label = { # Mapping from image path to object label
         path : label
         for label, paths in annotations.img_paths_by_label.items()
         for path in paths
+        if not is_part_name(label)
     }
-    r.set('img_path_to_label', json.dumps(img_path_to_label))
+    # Use the object_label_to_part_labels mapping from annotations instead of building our own
+    _object_label_to_parts = {obj_label: sorted(part_labels) for obj_label, part_labels in annotations.object_label_to_part_labels.items()}
 
     # Load existing annotations
     if os.path.exists(ANNOTATION_FILE):
@@ -127,3 +135,9 @@ def mark_image_as_annotated(image_path: str) -> None:
 def is_image_annotated(image_path: str) -> bool:
     '''Check if an image is already annotated.'''
     return r.exists(f'{IMAGE_ANNOTATED_PREFIX}{image_path}')
+
+def image_path_to_part_labels(image_path: str) -> list[str]:
+    logger.info(f'Image path in path to label? {image_path in _img_path_to_label}')
+    logger.info(f'Image path to label: {_img_path_to_label[image_path]}')
+
+    return _object_label_to_parts[_img_path_to_label[image_path]]

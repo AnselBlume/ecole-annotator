@@ -45,7 +45,8 @@ export default function SegmentationReviewApp() {
       statusMap[name] = {
         is_poor_quality: part.is_poor_quality || false,
         is_correct: null,
-        is_complete: part.is_complete || true,
+        is_complete: part.is_complete !== false,
+        has_existing_annotations: part.has_existing_annotations !== false
       }
     })
     setQualityStatus(statusMap)
@@ -105,6 +106,7 @@ export default function SegmentationReviewApp() {
         is_poor_quality: status.is_poor_quality || false,
         is_correct: status.is_correct === null ? true : status.is_correct, // Default to true if null
         is_complete: status.is_complete === undefined ? true : status.is_complete,
+        has_existing_annotations: part.has_existing_annotations !== false // Preserve the flag
       };
 
       updatedParts[name] = updatedPart;
@@ -293,8 +295,28 @@ export default function SegmentationReviewApp() {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-[60vh] w-full text-gray-400 bg-gray-100 rounded-lg">
-                  No mask available for {activePart}
+                <div className="flex flex-col items-center justify-center h-[60vh] w-full text-gray-500 bg-gray-100 rounded-lg">
+                  <div className="text-center p-6">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                    </svg>
+                    <h3 className="mt-2 text-sm font-medium">No annotations for {activePart.split("--part:")[1] || activePart}</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Click the "Annotate Part" button below to create annotations for this part.
+                    </p>
+                    <div className="mt-6">
+                      <button
+                        type="button"
+                        className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        onClick={handleStartAnnotation}
+                      >
+                        <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                        </svg>
+                        Add Annotation
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -354,8 +376,10 @@ export default function SegmentationReviewApp() {
             <div className="bg-gray-50 p-4 rounded-md">
               <h3 className="font-medium text-gray-700 mb-3">Parts</h3>
               <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-                {Object.keys(imageData.parts).map((partName) => {
+                {Object.entries(imageData.parts).map(([partName, part]) => {
                   const status = getPartStatus(partName);
+                  const hasExistingAnnotations = part.has_existing_annotations !== false;
+
                   return (
                     <button
                       key={partName}
@@ -368,11 +392,19 @@ export default function SegmentationReviewApp() {
                         ${activePart === partName ? 'bg-blue-50 border-blue-300' : 'border-gray-200'}
                         ${status === "correct" ? 'bg-green-50 border-green-200' : ''}
                         ${status === "incorrect" ? 'bg-red-50 border-red-200' : ''}
+                        ${!hasExistingAnnotations ? 'border-dashed border-gray-300' : ''}
                       `}
                     >
-                      <span className="text-sm font-medium truncate">
-                        {partName.split("--part:")[1] || partName}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">
+                          {partName.split("--part:")[1] || partName}
+                        </span>
+                        {!hasExistingAnnotations && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                            No annotations
+                          </span>
+                        )}
+                      </div>
 
                       {status && (
                         <span className={`${status === "correct" ? 'text-green-600' : 'text-red-600'}`}>

@@ -8,6 +8,7 @@ from pycocotools import mask as mask_utils
 
 from utils.image_utils import convert_to_pil_image
 from render_mask import image_from_masks
+from dataset.annotation import RLEAnnotation
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +242,6 @@ def create_rle_from_mask(mask: np.ndarray, image_path: str) -> Dict[str, Any]:
     """
     Convert a binary mask to RLE format
     """
-    from pycocotools import mask as mask_utils
-    from dataset.annotation import RLEAnnotation
 
     try:
         # Convert to RLE
