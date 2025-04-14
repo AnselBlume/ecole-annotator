@@ -105,8 +105,8 @@ trap "echo '🛑 Shutting down...'; kill $BACKEND_PID $FRONTEND_PID $REDIS_PID; 
 
 echo ""
 echo "==========================================="
-echo "📡 Backend running at: http://$HOSTNAME:$BACKEND_PORT"
-echo "🖼️ Frontend running at: http://$HOSTNAME:$FRONTEND_PORT"
+echo "📡 Backend running at: http://$HOSTNAME:$BACKEND_PORT/docs"
+echo "🖼️ Frontend running at: http://$HOSTNAME:$FRONTEND_PORT${PUBLIC_URL}"
 echo ""
 if [ "$DEPLOY_MODE" = "host" ]; then
   echo "🌍 Services accessible from: http://$HOSTNAME:$FRONTEND_PORT"
