@@ -54,7 +54,7 @@ def save_annotation_state(annotation_state: AnnotationState, to_file: bool = Tru
         with open(ANNOTATION_FILE, 'wb') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Acquire exclusive lock
             try:
-                f.write(orjson.dumps(annotation_state.model_dump()))
+                f.write(orjson.dumps(annotation_state.model_dump(), option=orjson.OPT_INDENT_2))
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Release lock
 

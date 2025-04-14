@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import hashlib
 from tqdm import tqdm
 from fastapi import HTTPException, status, APIRouter
 from services.image_queue import acquire_image_queue_lock, initialize_queue, IMAGE_QUEUE_KEY
@@ -121,11 +122,11 @@ def _handle_resize(image_data: ImageAnnotation):
 
     # Generate new path. B64 encode original path as suffix to basename to avoid possible collisions
     basename = os.path.splitext(os.path.basename(image_data['image_path']))[0]
-    orig_encoded_path = base64.b64encode(image_data['image_path'].encode()).decode()
+    orig_path_hash = short_md5(image_data['image_path'])
     new_path = os.path.join(
         DATA_DIR,
         'resized_images',
-        f'{basename}_{orig_encoded_path}.jpg'
+        f'{basename}_{orig_path_hash}.jpg'
     )
     resized_image.save(new_path)
     old_path = image_data['image_path']
@@ -172,3 +173,12 @@ def _handle_resize(image_data: ImageAnnotation):
         release_lock(annotation_state_lock)
 
     return image_data
+
+def short_md5(path: str) -> str:
+    # Generate MD5 hash (raw bytes)
+    md5_bytes = hashlib.md5(path.encode('utf-8')).digest()
+
+    # Base64 encode it, remove padding (=), and make it URL-safe
+    short_hash = base64.urlsafe_b64encode(md5_bytes).decode('utf-8').rstrip('=')
+
+    return short_hash
