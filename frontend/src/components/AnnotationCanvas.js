@@ -180,19 +180,51 @@ export default function AnnotationCanvas({
         currentTime - lastClickTime < 300) {
 
       // Delete the point on double click
+      let updatedPositivePoints = [...positivePoints];
+      let updatedNegativePoints = [...negativePoints];
+      let updatedPolygonPoints = [...polygonPoints];
+
       if (clickedPoint.type === 'positive') {
-        setPositivePoints(positivePoints.filter((_, i) => i !== clickedPoint.index))
+        updatedPositivePoints = positivePoints.filter((_, i) => i !== clickedPoint.index);
+        setPositivePoints(updatedPositivePoints);
       } else if (clickedPoint.type === 'negative') {
-        setNegativePoints(negativePoints.filter((_, i) => i !== clickedPoint.index))
+        updatedNegativePoints = negativePoints.filter((_, i) => i !== clickedPoint.index);
+        setNegativePoints(updatedNegativePoints);
       } else if (clickedPoint.type === 'polygon') {
-        setPolygonPoints(polygonPoints.filter((_, i) => i !== clickedPoint.index))
+        updatedPolygonPoints = polygonPoints.filter((_, i) => i !== clickedPoint.index);
+        setPolygonPoints(updatedPolygonPoints);
       }
 
       // Reset selection and double click tracking
-      setSelectedPoint(null)
-      setLastClickedPoint(null)
-      setLastClickTime(0)
-      return
+      setSelectedPoint(null);
+      setLastClickedPoint(null);
+      setLastClickTime(0);
+
+      // Trigger mask preview after point deletion via double-click
+      if (onPreviewMask) {
+        const newRequestId = previewRequestId + 1;
+        setPreviewRequestId(newRequestId);
+
+        // Use timeout to ensure state updates have completed
+        setTimeout(() => {
+          if (isPointPromptMode) {
+            console.log("Triggering preview after point deletion (double-click)");
+            onPreviewMask({
+              positivePoints: updatedPositivePoints,
+              negativePoints: updatedNegativePoints,
+              requestId: newRequestId
+            });
+          } else if (updatedPolygonPoints.length >= 3) {
+            console.log("Triggering preview after polygon point deletion (double-click)");
+            onPreviewMask({
+              polygonPoints: updatedPolygonPoints,
+              requestId: newRequestId
+            });
+          }
+        }, 50);
+      }
+
+      return;
     }
 
     // Store info for double click detection
@@ -508,14 +540,46 @@ export default function AnnotationCanvas({
   const handleKeyDown = (e) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (selectedPoint) {
+        let updatedPositivePoints = [...positivePoints];
+        let updatedNegativePoints = [...negativePoints];
+        let updatedPolygonPoints = [...polygonPoints];
+
         if (selectedPoint.type === 'positive') {
-          setPositivePoints(positivePoints.filter((_, i) => i !== selectedPoint.index))
+          updatedPositivePoints = positivePoints.filter((_, i) => i !== selectedPoint.index);
+          setPositivePoints(updatedPositivePoints);
         } else if (selectedPoint.type === 'negative') {
-          setNegativePoints(negativePoints.filter((_, i) => i !== selectedPoint.index))
+          updatedNegativePoints = negativePoints.filter((_, i) => i !== selectedPoint.index);
+          setNegativePoints(updatedNegativePoints);
         } else if (selectedPoint.type === 'polygon') {
-          setPolygonPoints(polygonPoints.filter((_, i) => i !== selectedPoint.index))
+          updatedPolygonPoints = polygonPoints.filter((_, i) => i !== selectedPoint.index);
+          setPolygonPoints(updatedPolygonPoints);
         }
-        setSelectedPoint(null)
+
+        setSelectedPoint(null);
+
+        // Trigger mask preview after point deletion
+        if (onPreviewMask) {
+          const newRequestId = previewRequestId + 1;
+          setPreviewRequestId(newRequestId);
+
+          // Use timeout to ensure state updates have completed
+          setTimeout(() => {
+            if (isPointPromptMode) {
+              console.log("Triggering preview after point deletion (keyboard)");
+              onPreviewMask({
+                positivePoints: updatedPositivePoints,
+                negativePoints: updatedNegativePoints,
+                requestId: newRequestId
+              });
+            } else if (updatedPolygonPoints.length >= 3) {
+              console.log("Triggering preview after polygon point deletion (keyboard)");
+              onPreviewMask({
+                polygonPoints: updatedPolygonPoints,
+                requestId: newRequestId
+              });
+            }
+          }, 50);
+        }
       }
     }
   }
@@ -523,14 +587,46 @@ export default function AnnotationCanvas({
   // Delete selected point
   const handleDeletePoint = () => {
     if (selectedPoint) {
+      let updatedPositivePoints = [...positivePoints];
+      let updatedNegativePoints = [...negativePoints];
+      let updatedPolygonPoints = [...polygonPoints];
+
       if (selectedPoint.type === 'positive') {
-        setPositivePoints(positivePoints.filter((_, i) => i !== selectedPoint.index))
+        updatedPositivePoints = positivePoints.filter((_, i) => i !== selectedPoint.index);
+        setPositivePoints(updatedPositivePoints);
       } else if (selectedPoint.type === 'negative') {
-        setNegativePoints(negativePoints.filter((_, i) => i !== selectedPoint.index))
+        updatedNegativePoints = negativePoints.filter((_, i) => i !== selectedPoint.index);
+        setNegativePoints(updatedNegativePoints);
       } else if (selectedPoint.type === 'polygon') {
-        setPolygonPoints(polygonPoints.filter((_, i) => i !== selectedPoint.index))
+        updatedPolygonPoints = polygonPoints.filter((_, i) => i !== selectedPoint.index);
+        setPolygonPoints(updatedPolygonPoints);
       }
-      setSelectedPoint(null)
+
+      setSelectedPoint(null);
+
+      // Trigger mask preview after point deletion
+      if (onPreviewMask) {
+        const newRequestId = previewRequestId + 1;
+        setPreviewRequestId(newRequestId);
+
+        // Use timeout to ensure state updates have completed
+        setTimeout(() => {
+          if (isPointPromptMode) {
+            console.log("Triggering preview after point deletion");
+            onPreviewMask({
+              positivePoints: updatedPositivePoints,
+              negativePoints: updatedNegativePoints,
+              requestId: newRequestId
+            });
+          } else if (updatedPolygonPoints.length >= 3) {
+            console.log("Triggering preview after polygon point deletion");
+            onPreviewMask({
+              polygonPoints: updatedPolygonPoints,
+              requestId: newRequestId
+            });
+          }
+        }, 50);
+      }
     }
   }
 
@@ -599,25 +695,8 @@ export default function AnnotationCanvas({
       </div>
 
       <div className="flex justify-end items-center mb-2 space-x-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDeletePoint}
-          disabled={!selectedPoint}
-          className={!selectedPoint ? "opacity-50" : ""}
-        >
-          Delete Point
-        </Button>
         <Button variant="outline" size="sm" onClick={handleReset}>
           Reset
-        </Button>
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={(isPointPromptMode && positivePoints.length === 0) ||
-                   (!isPointPromptMode && polygonPoints.length < 3)}
-        >
-          Generate Mask
         </Button>
       </div>
 
@@ -625,10 +704,10 @@ export default function AnnotationCanvas({
         {selectedPoint ? (
           <span>
             Selected: {selectedPoint.type} point #{selectedPoint.index + 1}
-            (press Delete to remove, or double-click on the point)
+            (press Delete/Backspace to remove, or double-click on the point)
           </span>
         ) : (
-          <span>Click on a point to select it, or double-click to delete it</span>
+          <span>Click on a point to select it, or double-click directly on a point to delete it</span>
         )}
       </div>
 

@@ -144,9 +144,10 @@ export default function MaskSelector({
       {/* Action buttons for the current mask */}
       <div className="flex flex-col gap-1">
         <Button
-          variant="destructive"
+          variant="outline"
           size="sm"
           onClick={handleDeleteMask}
+          className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600"
         >
           Delete Mask
         </Button>

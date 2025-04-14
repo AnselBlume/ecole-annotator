@@ -574,7 +574,6 @@ export default function ModularAnnotationMode({
               <div className="mt-4 text-xs text-gray-500">
                 <p>Add positive points (green) by left-clicking where the object is located.</p>
                 <p>Add negative points (red) by right-clicking where the object is not located.</p>
-                <p>Click "Generate Mask" when you're satisfied with the preview.</p>
               </div>
             </div>
 
@@ -627,7 +626,7 @@ export default function ModularAnnotationMode({
         <Button
           onClick={handleSaveAllMasks}
           disabled={isLoading || !masks.some(mask => mask.rle !== null)}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="bg-blue-600 hover:bg-blue-700 text-white"
         >
           {isLoading ? "Saving..." : "Save All Masks"}
         </Button>
