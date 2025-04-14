@@ -1,5 +1,5 @@
+import orjson
 from model import AnnotationState
-from collections import defaultdict
 from dataset.annotation import collect_annotations, DatasetMetadata
 import os
 import json
@@ -51,10 +51,10 @@ def save_annotation_state(annotation_state: AnnotationState, to_file: bool = Tru
     r.set(ANNOTATION_STATE_KEY, annotation_state.model_dump_json())
 
     if to_file: # Save to file with file locking
-        with open(ANNOTATION_FILE, 'w') as f:
+        with open(ANNOTATION_FILE, 'wb') as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Acquire exclusive lock
             try:
-                json.dump(annotation_state.model_dump(), f, indent=2)
+                f.write(orjson.dumps(annotation_state.model_dump()))
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Release lock
 

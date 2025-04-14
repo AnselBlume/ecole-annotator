@@ -4,6 +4,16 @@ import { Checkbox } from "./components/ui/checkbox"
 import { Header } from "./components/ui/header"
 import { Badge } from "./components/ui/badge"
 import ModularAnnotationMode from "./components/ModularAnnotationMode"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./components/ui/alert-dialog"
 
 export default function SegmentationReviewApp() {
   const [imageData, setImageData] = useState(null)
@@ -12,6 +22,7 @@ export default function SegmentationReviewApp() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isAnnotating, setIsAnnotating] = useState(false)
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
 
   const baseURL = process.env.REACT_APP_BACKEND
 
@@ -86,6 +97,22 @@ export default function SegmentationReviewApp() {
 
   const handleSave = async () => {
     if (!imageData) return
+
+    // Check if all parts have been marked as correct or incorrect
+    const unmarkedParts = Object.entries(qualityStatus).filter(
+      ([_, status]) => status.is_correct === null
+    );
+
+    if (unmarkedParts.length > 0) {
+      setShowSaveConfirm(true);
+      return;
+    }
+
+    // If all parts are marked, proceed with saving
+    saveAnnotations();
+  }
+
+  const saveAnnotations = async () => {
     setLoading(true)
 
     // Log the original data for debugging
@@ -456,6 +483,22 @@ export default function SegmentationReviewApp() {
           </div>
         </div>
       </main>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Save</AlertDialogTitle>
+            <AlertDialogDescription>
+              Some parts haven't been marked as correct or incorrect. Do you want to save anyway?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={saveAnnotations}>Save Anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
