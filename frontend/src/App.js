@@ -72,6 +72,18 @@ export default function SegmentationReviewApp() {
         is_correct: isCorrect,
       },
     }))
+
+    // If marked as correct, move to the next part
+    if (isCorrect) {
+      const partNames = Object.keys(imageData.parts);
+      const currentIndex = partNames.indexOf(partName);
+
+      // If there's a next part, switch to it
+      if (currentIndex < partNames.length - 1) {
+        const nextPart = partNames[currentIndex + 1];
+        setActivePart(nextPart);
+      }
+    }
   }
 
   const togglePoorQuality = (partName) => {
