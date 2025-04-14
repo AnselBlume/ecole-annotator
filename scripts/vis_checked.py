@@ -13,11 +13,7 @@ from render_mask import image_from_masks  # Adjust import if needed
 from dataset.utils import get_part_suffix
 
 INPUT_JSON = '/shared/nas2/blume5/sp25/annotator/data/annotations.json'
-OUTPUT_DIR = 'output_visualizations'
-
-def ensure_dir(path: str):
-    if not os.path.exists(path):
-        os.makedirs(path)
+OUTPUT_DIR = '/shared/nas2/blume5/sp25/annotator/data/output_visualizations'
 
 def visualize_checked_parts(annotations: Dict, output_base: str):
     for image_path, data in annotations['checked'].items():
@@ -46,7 +42,7 @@ def visualize_checked_parts(annotations: Dict, output_base: str):
 
             # Save
             part_dir = os.path.join(output_base, image_id)
-            ensure_dir(part_dir)
+            os.makedirs(part_dir, exist_ok=True)
             part_suffix = get_part_suffix(part_name)
             output_path = os.path.join(part_dir, f"{part_suffix}.jpg")
             visual.save(output_path)
@@ -56,5 +52,5 @@ if __name__ == '__main__':
     with open(INPUT_JSON, 'r') as f:
         annotations = orjson.loads(f.read())
 
-    ensure_dir(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     visualize_checked_parts(annotations, OUTPUT_DIR)

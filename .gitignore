@@ -6,3 +6,4 @@ logs
 frontend/.env.local
 /sam2
 *.log
+output_visualizations
