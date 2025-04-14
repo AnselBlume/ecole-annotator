@@ -10,7 +10,7 @@ from root_utils import open_image
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_DIMENSION = 1024
+DEFAULT_MAX_DIMENSION = 2048
 DEFAULT_INTERPOLATION_MODE = InterpolationMode.BICUBIC
 
 def needs_resize(image_path: str, max_dimension: int = DEFAULT_MAX_DIMENSION) -> tuple[bool, PILImage]:
