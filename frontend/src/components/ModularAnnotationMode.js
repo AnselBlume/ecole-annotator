@@ -393,23 +393,6 @@ export default function ModularAnnotationMode({
       } else {
         console.log("No points provided for preview");
       }
-      // else if (data.sam_prompt !== undefined) {
-      //   const promptResult = await fetch(`${baseURL}/mask/segment-sam`, {
-      //     method: "POST",
-      //     headers: { "Content-Type": "application/json" },
-      //     body: JSON.stringify({
-      //       image_path: imageData.image_path,
-      //       sam_prompt: data.sam_prompt,
-      //     }),
-      //   });
-
-      //   if (promptResult.ok) {
-      //     const result = await promptResult.json();
-      //     if (result.success && result.rle) {
-      //       rle = result.rle;
-      //     }
-      //   }
-      // }
 
       if (rle) {
         // Validate the RLE data
