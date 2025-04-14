@@ -256,7 +256,7 @@ export default function SegmentationReviewApp() {
         </div>
 
         <div className="bg-white rounded-lg shadow-sm">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr,300px] gap-6 p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr,400px] gap-6 p-6">
             {/* Main image display area */}
             <div className="flex flex-col items-center">
               {showMask ? (
@@ -339,118 +339,118 @@ export default function SegmentationReviewApp() {
                 </div>
               )}
 
-              {/* Annotation controls */}
-              <div className="mt-6 w-full max-w-md">
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <Button
-                    onClick={() => setCorrectStatus(activePart, true)}
-                    variant="outline"
-                    className={`h-12 ${qualityStatus[activePart]?.is_correct === true
-                      ? "bg-green-50 border-green-500 text-green-700"
-                      : ""}`}
-                  >
-                    ✓ Correct
-                  </Button>
-                  <Button
-                    onClick={() => setCorrectStatus(activePart, false)}
-                    variant="outline"
-                    className={`h-12 ${qualityStatus[activePart]?.is_correct === false
-                      ? "bg-red-50 border-red-500 text-red-700"
-                      : ""}`}
-                  >
-                    ✗ Incorrect
-                  </Button>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-md space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-100 rounded">
-                    <Checkbox
-                      checked={qualityStatus[activePart]?.is_poor_quality || false}
-                      onCheckedChange={() => togglePoorQuality(activePart)}
-                    />
-                    <span>Poor Quality</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-100 rounded">
-                    <Checkbox
-                      checked={!qualityStatus[activePart]?.is_complete || false}
-                      onCheckedChange={() => toggleIncomplete(activePart)}
-                    />
-                    <span>Incomplete</span>
-                  </label>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={handleSkip}
-                    variant="outline"
-                    className="bg-gray-50 hover:bg-gray-100"
-                  >
-                    Skip
-                  </Button>
-                  <Button
-                    onClick={handleSave}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Save and Next
-                  </Button>
-                </div>
+              {/* Action buttons below image */}
+              <div className="mt-6 grid grid-cols-2 gap-3 max-w-md w-full">
+                <Button
+                  onClick={handleSkip}
+                  variant="outline"
+                  className="bg-gray-50 hover:bg-gray-100"
+                >
+                  Skip
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  Save and Next
+                </Button>
               </div>
             </div>
 
             {/* Part selection sidebar */}
             <div className="bg-gray-50 p-4 rounded-md">
               <h3 className="font-medium text-gray-700 mb-3">Parts</h3>
-              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
                 {Object.entries(imageData.parts).map(([partName, part]) => {
                   const status = getPartStatus(partName);
-                  // Check if there are actually any RLEs in the part
                   const hasAnnotations = part.rles && part.rles.length > 0;
+                  const isActive = activePart === partName;
 
                   return (
-                    <button
+                    <div
                       key={partName}
-                      onClick={() => setActivePart(partName)}
-                      onDoubleClick={() => {
-                        setActivePart(partName);
-                        handleStartAnnotation();
-                      }}
-                      className={`w-full text-left px-3 py-3 rounded-md border flex items-center justify-between group hover:bg-gray-100 transition-colors
-                        ${activePart === partName ? 'bg-blue-50 border-blue-300' : 'border-gray-200'}
-                        ${status === "correct" ? 'bg-green-50 border-green-200' : ''}
-                        ${status === "incorrect" ? 'bg-red-50 border-red-200' : ''}
-                        ${!hasAnnotations ? 'border-dashed border-gray-300' : ''}
-                      `}
+                      className={`rounded-md border overflow-hidden ${!hasAnnotations ? 'border-dashed border-gray-300' : 'border-gray-200'} ${isActive ? 'ring-2 ring-blue-300' : ''}`}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {partName.split("--part:")[1] || partName}
-                        </span>
-                        {!hasAnnotations && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                            No annotations
-                          </span>
-                        )}
+                      <div
+                        onClick={() => setActivePart(partName)}
+                        onDoubleClick={() => {
+                          setActivePart(partName);
+                          handleStartAnnotation();
+                        }}
+                        className={`p-3 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-100'} ${status === "correct" ? 'bg-green-50' : ''} ${status === "incorrect" ? 'bg-red-50' : ''}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">
+                              {partName.split("--part:")[1] || partName}
+                            </span>
+                            {!hasAnnotations && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                No annotations
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent triggering the parent onClick
+                              setActivePart(partName);
+                              handleStartAnnotation();
+                            }}
+                            className="p-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded"
+                          >
+                            {hasAnnotations ? "Edit" : "Add"}
+                          </button>
+                        </div>
                       </div>
 
-                      {status && (
-                        <span className={`${status === "correct" ? 'text-green-600' : 'text-red-600'}`}>
-                          {status === "correct" ? "✓" : "✗"}
-                        </span>
+                      {isActive && (
+                        <div className="p-3 bg-white border-t border-gray-200">
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                            <button
+                              onClick={() => setCorrectStatus(partName, true)}
+                              className={`px-2 py-1.5 text-xs rounded-md border ${qualityStatus[partName]?.is_correct === true
+                                ? "bg-green-50 border-green-500 text-green-700"
+                                : "border-gray-200 hover:bg-gray-50"}`}
+                            >
+                              ✓ Correct
+                            </button>
+                            <button
+                              onClick={() => setCorrectStatus(partName, false)}
+                              className={`px-2 py-1.5 text-xs rounded-md border ${qualityStatus[partName]?.is_correct === false
+                                ? "bg-red-50 border-red-500 text-red-700"
+                                : "border-gray-200 hover:bg-gray-50"}`}
+                            >
+                              ✗ Incorrect
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-xs mb-1">
+                            <label className="flex items-center cursor-pointer hover:bg-gray-50 py-1 px-2 rounded w-full">
+                              <Checkbox
+                                className="h-3 w-3 mr-1"
+                                checked={qualityStatus[partName]?.is_poor_quality || false}
+                                onCheckedChange={() => togglePoorQuality(partName)}
+                              />
+                              <span>Poor Quality</span>
+                            </label>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-xs">
+                            <label className="flex items-center cursor-pointer hover:bg-gray-50 py-1 px-2 rounded w-full">
+                              <Checkbox
+                                className="h-3 w-3 mr-1"
+                                checked={!qualityStatus[partName]?.is_complete || false}
+                                onCheckedChange={() => toggleIncomplete(partName)}
+                              />
+                              <span>Incomplete</span>
+                            </label>
+                          </div>
+                        </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
-              </div>
-
-              <div className="mt-6">
-                <Button
-                  variant="outline"
-                  className="w-full border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
-                  onClick={handleStartAnnotation}
-                >
-                  {showMask ? "Re-annotate Part" : "Annotate Part"}
-                </Button>
               </div>
             </div>
           </div>

@@ -64,10 +64,16 @@ export default function MaskSelector({
   // Delete the current mask
   const handleDeleteMask = useCallback(() => {
     if (masks.length <= 1) {
-      // Don't delete the last mask, just clear it
-      setMasks([{ id: 'new-0', rle: null, isExisting: false }]);
-      setActiveMaskIndex(0);
+      // Create a single empty mask to replace the current one
+      // (instead of just clearing the existing one)
       clearPreview();
+      setMasks([{
+        id: `new-${Date.now()}`,
+        rle: null,
+        isExisting: false,
+        partName: activePart
+      }]);
+      setActiveMaskIndex(0);
       return;
     }
 
@@ -91,7 +97,7 @@ export default function MaskSelector({
         onPreviewMask(newMasks[newIndex].rle);
       }
     }, 50);
-  }, [masks, activeMaskIndex, setMasks, setActiveMaskIndex, clearPreview, onPreviewMask]);
+  }, [masks, activeMaskIndex, setMasks, setActiveMaskIndex, clearPreview, onPreviewMask, activePart]);
 
   // Clear the current mask data
   const handleClearMask = useCallback(() => {
@@ -140,7 +146,6 @@ export default function MaskSelector({
         <Button
           variant="destructive"
           size="sm"
-          disabled={masks.length <= 1}
           onClick={handleDeleteMask}
         >
           Delete Mask

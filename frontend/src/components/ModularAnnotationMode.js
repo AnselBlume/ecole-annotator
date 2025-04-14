@@ -461,7 +461,7 @@ export default function ModularAnnotationMode({
     setError(null);
 
     try {
-      // Filter out masks with no RLE data and clean/validate each RLE object
+      // Get all valid masks
       const masksToSave = masks
         .filter(mask => mask.rle !== null)
         .map(mask => {
@@ -482,11 +482,8 @@ export default function ModularAnnotationMode({
         })
         .filter(rle => rle !== null); // Remove any null entries from invalid RLEs
 
-      if (masksToSave.length === 0) {
-        setError("No valid masks to save");
-        setIsLoading(false);
-        return;
-      }
+      // We'll still proceed even if no valid masks exist, because this means the part has no annotations
+      // which is a valid state we want to save
 
       // Create URL with query parameters for image_path and part_name
       const url = new URL(`${baseURL}/annotate/update-part-annotation`);
