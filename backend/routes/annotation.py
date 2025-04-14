@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status, APIRouter
+from fastapi import HTTPException, status, APIRouter, Request
 from model import ImageAnnotation, ImageQualityUpdate, PointPrompt, PolygonPrompt
 from services.annotator import (
     get_annotation_state,
@@ -9,89 +9,19 @@ from services.annotator import (
     save_annotation_state
 )
 from services.redis_client import release_lock, LockAcquisitionError
+from services.sam_predictor import (
+    get_user_id,
+    process_point_prompt,
+    process_polygon_prompt,
+    clear_user_cache_for_image
+)
+from utils.mask_utils import create_rle_from_mask
 import logging
-from typing import Dict, Any
-import numpy as np
-import torch
-from root_utils import open_image
-import time
-from fastapi import Request
+import traceback
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# SAM2 predictor singleton
-sam2_predictor = None
-SAM_MODEL_NAME = "facebook/sam2.1-hiera-base-plus"
-
-# User-specific image embedding cache for SAM2
-# Format: { 'user_id': { 'image_path': {'embeddings': data, 'timestamp': time, 'size': (h,w), 'masks': {'part_name': {'mask': mask_data, 'logits': logits_data}} } } }
-# The 'masks' field caches the per-part most recent mask and logits for improved prediction
-# This will be cleaned up periodically to avoid memory leaks
-image_embedding_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
-CACHE_CLEANUP_INTERVAL = 3600  # seconds (1 hour)
-CACHE_ENTRY_TTL = 1800  # seconds (30 minutes)
-last_cache_cleanup = time.time()
-
-def cleanup_old_cache_entries():
-    """Remove stale cache entries to prevent memory leaks"""
-    global last_cache_cleanup
-    current_time = time.time()
-
-    # Only run cleanup periodically
-    if current_time - last_cache_cleanup < CACHE_CLEANUP_INTERVAL:
-        return
-
-    logger.info("Cleaning up stale SAM embedding cache entries")
-    users_to_remove = []
-
-    for user_id, user_cache in image_embedding_cache.items():
-        paths_to_remove = []
-
-        for image_path, cache_data in user_cache.items():
-            if current_time - cache_data['timestamp'] > CACHE_ENTRY_TTL:
-                paths_to_remove.append(image_path)
-
-        for path in paths_to_remove:
-            del user_cache[path]
-
-        if not user_cache:
-            users_to_remove.append(user_id)
-
-    for user_id in users_to_remove:
-        del image_embedding_cache[user_id]
-
-    last_cache_cleanup = current_time
-    logger.info(f"Cache cleanup complete. {len(image_embedding_cache)} users remain in cache")
-
-def get_user_id(request: Request) -> str:
-    """Get a consistent identifier for the current user session"""
-    # Use client's IP address + user agent as a simple user identifier
-    # In a production app, you would use proper session/user authentication
-    client_host = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("user-agent", "unknown")
-    return f"{client_host}:{user_agent}"
-
-def get_sam2_predictor():
-    """
-    Initialize SAM2 predictor as a singleton to avoid costly reinitialization.
-    """
-    global sam2_predictor
-    if sam2_predictor is None:
-        try:
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
-            logger.info("Initializing SAM2 predictor...")
-            # We use tiny model for speed, but you can use other sizes like 'small', 'base_plus', or 'large'
-            sam2_predictor = SAM2ImagePredictor.from_pretrained(
-                SAM_MODEL_NAME,
-                device="cuda" if torch.cuda.is_available() else "cpu"
-            )
-            logger.info("SAM2 predictor initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize SAM2 predictor: {e}")
-            raise RuntimeError(f"Failed to initialize SAM2 predictor: {e}")
-    return sam2_predictor
 
 @router.post('/save-annotation')
 def save_annotation(annotation: ImageAnnotation):
@@ -126,12 +56,7 @@ def save_annotation(annotation: ImageAnnotation):
                 mark_image_as_annotated(annotation.image_path)
 
                 # Clear any cached masks for this image across all users
-                # This ensures we don't use old mask data after saving
-                for user_id in image_embedding_cache:
-                    if annotation.image_path in image_embedding_cache[user_id]:
-                        if 'masks' in image_embedding_cache[user_id][annotation.image_path]:
-                            logger.info(f"Clearing cached masks for image {annotation.image_path} for user {user_id}")
-                            image_embedding_cache[user_id][annotation.image_path]['masks'] = {}
+                clear_user_cache_for_image(annotation.image_path)
 
                 return {'status': 'saved'}
             finally:
@@ -354,62 +279,6 @@ def update_part_annotation(image_path: str, part_name: str, annotation_data: dic
             detail=str(e)
         )
 
-# Helper function to safely convert RLE annotation to dict
-def rle_to_dict(rle_annotation):
-    """
-    Convert an RLE annotation to a dictionary, handling different Pydantic versions
-    and object types.
-    """
-    try:
-        # Get basic attributes using different methods depending on the object type
-        if hasattr(rle_annotation, "model_dump"):
-            # For newer Pydantic versions (v2+)
-            result = rle_annotation.model_dump()
-        elif hasattr(rle_annotation, "dict"):
-            # For older Pydantic versions (v1)
-            result = rle_annotation.dict()
-        elif hasattr(rle_annotation, "__dict__"):
-            # Fallback for objects with __dict__ attribute
-            result = vars(rle_annotation)
-        else:
-            # Manual conversion
-            result = {}
-
-        # Always directly access the attributes to ensure we get the values
-        # These are the critical fields we need for RLE data
-        if hasattr(rle_annotation, "counts"):
-            result["counts"] = rle_annotation.counts
-        if hasattr(rle_annotation, "size"):
-            result["size"] = rle_annotation.size
-        if hasattr(rle_annotation, "image_path"):
-            result["image_path"] = rle_annotation.image_path
-        if hasattr(rle_annotation, "is_root_concept"):
-            result["is_root_concept"] = rle_annotation.is_root_concept
-
-        # Verify we have the critical fields with valid values
-        if "counts" not in result or result["counts"] is None:
-            logger.error(f"Missing 'counts' in RLE data: {result}")
-            raise ValueError("Missing 'counts' field in RLE data")
-
-        if "size" not in result or result["size"] is None:
-            logger.error(f"Missing 'size' in RLE data: {result}")
-            raise ValueError("Missing 'size' field in RLE data")
-
-        # Ensure size is a list with 2 elements
-        if not isinstance(result["size"], list) or len(result["size"]) != 2:
-            logger.error(f"Invalid 'size' format in RLE data: {result['size']}")
-            raise ValueError(f"Invalid 'size' format in RLE data: {result['size']}")
-
-        # Log success
-        logger.debug(f"Successfully converted RLE data: {result}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error in rle_to_dict: {e}")
-        # Don't return a fallback dict with None values
-        # Instead, re-raise the exception so we can handle it properly
-        raise
-
 @router.post('/generate-mask-from-points')
 async def generate_mask_from_points(prompt: PointPrompt, request: Request):
     """
@@ -417,10 +286,6 @@ async def generate_mask_from_points(prompt: PointPrompt, request: Request):
     Returns RLE encoded mask.
     """
     try:
-        from dataset.annotation import RLEAnnotation
-        from pycocotools import mask as mask_utils
-        import traceback
-
         # Log incoming request for debugging
         logger.info(f"Generate mask from points for image: {prompt.image_path}")
         logger.info(f"Positive points: {[(p.x, p.y) for p in prompt.positive_points]}")
@@ -430,171 +295,23 @@ async def generate_mask_from_points(prompt: PointPrompt, request: Request):
         user_id = get_user_id(request)
         logger.info(f"Processing request for user: {user_id}")
 
-        # Make sure this user has their own clean cache for this image
-        ensure_clean_image_cache(user_id, prompt.image_path)
-
-        # Get the predictor (initializes once)
-        predictor = get_sam2_predictor()
-
-        # Set image
-        image = np.array(open_image(prompt.image_path))
-        logger.info(f"Image loaded with shape: {image.shape}")
-        predictor.set_image(image)
-
-        # Convert points to format expected by SAM
-        input_points = []
-        input_labels = []
-
-        for point in prompt.positive_points:
-            input_points.append([point.x, point.y])
-            input_labels.append(1)  # 1 for positive
-
-        for point in prompt.negative_points:
-            input_points.append([point.x, point.y])
-            input_labels.append(0)  # 0 for negative
-
-        # Convert to numpy arrays
-        input_points = np.array(input_points)
-        input_labels = np.array(input_labels)
-
-        logger.info(f"Running prediction with {len(input_points)} points")
-
-        # Run prediction with mask_input if available
-        if hasattr(prompt, 'mask_input') and prompt.mask_input and prompt.part_name:
-            # Try to get cached logits for this part
-            if user_id in image_embedding_cache and prompt.image_path in image_embedding_cache[user_id]:
-                user_cache = image_embedding_cache[user_id]
-                part_cache = user_cache[prompt.image_path].get('masks', {}).get(prompt.part_name, {})
-
-                # If we have logits for this part, use them
-                if 'logits' in part_cache:
-                    logger.info(f"Using cached logits for part: {prompt.part_name} for user: {user_id}")
-                    cached_logits = part_cache['logits']
-
-                    # Run prediction with the cached logits
-                    masks, scores, logits = predictor.predict(
-                        point_coords=input_points,
-                        point_labels=input_labels,
-                        mask_input=cached_logits[None, :, :],  # Add batch dimension
-                        multimask_output=True
-                    )
-                    logger.info(f"Prediction with cached logits complete")
-                else:
-                    logger.info(f"No cached logits found for part: {prompt.part_name}, running standard prediction")
-                    # Standard prediction without mask_input
-                    masks, scores, logits = predictor.predict(
-                        point_coords=input_points,
-                        point_labels=input_labels,
-                        multimask_output=True
-                    )
-            else:
-                logger.info(f"No cache found for user/image, running standard prediction")
-                # Standard prediction without mask_input
-                masks, scores, logits = predictor.predict(
-                    point_coords=input_points,
-                    point_labels=input_labels,
-                    multimask_output=True
-                )
-        else:
-            # Standard prediction without mask_input
-            masks, scores, logits = predictor.predict(
-                point_coords=input_points,
-                point_labels=input_labels,
-                multimask_output=True
-            )
-
-        # Log prediction results
-        logger.info(f"Got {len(masks)} masks with scores: {scores}")
-
-        # Get best mask based on score
-        mask_idx = np.argmax(scores)
-        best_mask = masks[mask_idx]
-        best_logits = logits[mask_idx]
-        logger.info(f"Selected mask {mask_idx} with score {scores[mask_idx]}")
-        logger.info(f"Mask shape: {best_mask.shape}, type: {best_mask.dtype}")
-        logger.info(f"Logits shape: {best_logits.shape}")
-        logger.info(f"Mask sum: {np.sum(best_mask)} (number of positive pixels)")
-
-        # Store mask and logits in cache if we have a part name
-        if prompt.part_name:
-            # Initialize user's cache if not exists
-            if user_id not in image_embedding_cache:
-                image_embedding_cache[user_id] = {}
-            if prompt.image_path not in image_embedding_cache[user_id]:
-                image_embedding_cache[user_id][prompt.image_path] = {
-                    'timestamp': time.time(),
-                    'masks': {}
-                }
-            if 'masks' not in image_embedding_cache[user_id][prompt.image_path]:
-                image_embedding_cache[user_id][prompt.image_path]['masks'] = {}
-
-            # Store both the mask and logits
-            image_embedding_cache[user_id][prompt.image_path]['masks'][prompt.part_name] = {
-                'mask': best_mask,
-                'logits': best_logits
-            }
-            logger.info(f"Cached mask and logits for part: {prompt.part_name} for user: {user_id}")
-
-        # Convert to RLE
-        fortran_mask = np.asfortranarray(best_mask.astype(np.uint8))
-        rle = mask_utils.encode(fortran_mask)
-
-        # Log RLE data
-        logger.info(f"RLE generated with size: {rle['size']}")
-        counts_preview = rle['counts']
-        if isinstance(counts_preview, bytes):
-            counts_preview = counts_preview.decode('utf-8')
-        logger.info(f"RLE counts preview: {counts_preview[:30]}...")
-
-        # Create RLE annotation
-        rle_annotation = RLEAnnotation(
-            counts=rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-            size=rle['size'],
-            image_path=prompt.image_path,
-            is_root_concept=False
+        # Process the point prompt to get a mask
+        best_mask, best_score, _ = process_point_prompt(
+            prompt.image_path,
+            user_id,
+            prompt.positive_points,
+            prompt.negative_points,
+            prompt.part_name
         )
 
-        # Use helper function to convert to dict
-        try:
-            rle_dict = rle_to_dict(rle_annotation)
-            logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
+        # Convert mask to RLE format
+        rle_dict = create_rle_from_mask(best_mask, prompt.image_path)
+        logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
 
-            # Double-check the critical fields
-            if 'counts' not in rle_dict or rle_dict['counts'] is None:
-                logger.error("Critical error: 'counts' is missing in final RLE dict")
-                # Fix it directly
-                rle_dict['counts'] = counts_preview
-
-            if 'size' not in rle_dict or rle_dict['size'] is None:
-                logger.error("Critical error: 'size' is missing in final RLE dict")
-                # Fix it directly
-                rle_dict['size'] = rle['size']
-
-            # Final verification
-            logger.info(f"Final RLE dict: {rle_dict}")
-
-            return {
-                "rle": rle_dict,
-                "score": float(scores[mask_idx])
-            }
-        except Exception as rle_error:
-            logger.error(f"Error creating RLE dict: {rle_error}")
-            logger.error(traceback.format_exc())
-
-            # Create a direct dictionary instead of using the helper
-            direct_rle = {
-                "counts": rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-                "size": rle['size'],
-                "image_path": prompt.image_path,
-                "is_root_concept": False
-            }
-
-            logger.info(f"Created direct RLE dict: {direct_rle}")
-
-            return {
-                "rle": direct_rle,
-                "score": float(scores[mask_idx])
-            }
+        return {
+            "rle": rle_dict,
+            "score": float(best_score)
+        }
 
     except Exception as e:
         logger.error(f"Error generating mask from points: {e}")
@@ -611,11 +328,6 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
     Returns RLE encoded mask.
     """
     try:
-        from dataset.annotation import RLEAnnotation
-        import cv2
-        from pycocotools import mask as mask_utils
-        import traceback
-
         # Log incoming request for debugging
         logger.info(f"Generate mask from polygon for image: {prompt.image_path}")
         logger.info(f"Polygon points: {[(p.x, p.y) for p in prompt.polygon_points]}")
@@ -624,88 +336,16 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
         user_id = get_user_id(request)
         logger.info(f"Processing polygon request for user: {user_id}")
 
-        # Make sure this user has their own clean cache for this image
-        ensure_clean_image_cache(user_id, prompt.image_path)
+        # Process the polygon to get a mask
+        mask = process_polygon_prompt(prompt.image_path, user_id, prompt.polygon_points)
 
-        # Open image to get dimensions
-        image = np.array(open_image(prompt.image_path))
-        logger.info(f"Image loaded with shape: {image.shape}")
-        height, width = image.shape[:2]
+        # Convert mask to RLE format
+        rle_dict = create_rle_from_mask(mask, prompt.image_path)
+        logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
 
-        # Create empty mask
-        mask = np.zeros((height, width), dtype=np.uint8)
-
-        # Convert points to format expected by cv2
-        polygon_points = []
-        for point in prompt.polygon_points:
-            polygon_points.append([point.x, point.y])
-
-        # Draw filled polygon
-        points = np.array(polygon_points, dtype=np.int32)
-        cv2.fillPoly(mask, [points], 1)
-
-        # Log mask details
-        logger.info(f"Created polygon mask with shape: {mask.shape}")
-        logger.info(f"Mask sum: {np.sum(mask)} (number of positive pixels)")
-
-        # Convert to RLE
-        fortran_mask = np.asfortranarray(mask)
-        rle = mask_utils.encode(fortran_mask)
-
-        # Log RLE data
-        logger.info(f"RLE generated with size: {rle['size']}")
-        counts_preview = rle['counts']
-        if isinstance(counts_preview, bytes):
-            counts_preview = counts_preview.decode('utf-8')
-        logger.info(f"RLE counts preview: {counts_preview[:30]}...")
-
-        # Create RLE annotation
-        rle_annotation = RLEAnnotation(
-            counts=rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-            size=rle['size'],
-            image_path=prompt.image_path,
-            is_root_concept=False
-        )
-
-        # Use helper function to convert to dict
-        try:
-            rle_dict = rle_to_dict(rle_annotation)
-            logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
-
-            # Double-check the critical fields
-            if 'counts' not in rle_dict or rle_dict['counts'] is None:
-                logger.error("Critical error: 'counts' is missing in final RLE dict")
-                # Fix it directly
-                rle_dict['counts'] = counts_preview
-
-            if 'size' not in rle_dict or rle_dict['size'] is None:
-                logger.error("Critical error: 'size' is missing in final RLE dict")
-                # Fix it directly
-                rle_dict['size'] = rle['size']
-
-            # Final verification
-            logger.info(f"Final RLE dict: {rle_dict}")
-
-            return {
-                "rle": rle_dict
-            }
-        except Exception as rle_error:
-            logger.error(f"Error creating RLE dict: {rle_error}")
-            logger.error(traceback.format_exc())
-
-            # Create a direct dictionary instead of using the helper
-            direct_rle = {
-                "counts": rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-                "size": rle['size'],
-                "image_path": prompt.image_path,
-                "is_root_concept": False
-            }
-
-            logger.info(f"Created direct RLE dict: {direct_rle}")
-
-            return {
-                "rle": direct_rle
-            }
+        return {
+            "rle": rle_dict
+        }
 
     except Exception as e:
         logger.error(f"Error generating mask from polygon: {e}")
@@ -715,25 +355,6 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
             detail=f"Failed to generate mask: {str(e)}"
         )
 
-def ensure_clean_image_cache(user_id: str, image_path: str):
-    """
-    Ensure that when a user starts working on an image, they have a clean cache.
-    This prevents one user's previous masks from affecting another user.
-    """
-    # First check if the user exists in the cache
-    if user_id not in image_embedding_cache:
-        image_embedding_cache[user_id] = {}
-        logger.info(f"Created new cache entry for user: {user_id}")
-        return
-
-    # Check if this user has this image in their cache
-    if image_path not in image_embedding_cache[user_id]:
-        # User doesn't have this image cached yet, which is fine
-        return
-
-    # If the user already has this image cached, we're good - they're continuing their own work
-    logger.info(f"User {user_id} already has a cache for image {image_path}")
-
 @router.post('/preview-mask-from-points')
 async def preview_mask_from_points(prompt: PointPrompt, request: Request):
     """
@@ -741,189 +362,34 @@ async def preview_mask_from_points(prompt: PointPrompt, request: Request):
     Similar to generate_mask_from_points but doesn't save the result.
     """
     try:
-        # Run cache cleanup on each request
-        cleanup_old_cache_entries()
-
-        from dataset.annotation import RLEAnnotation
-        from pycocotools import mask as mask_utils
-
         # Log incoming points data for debugging
         positive_count = len(prompt.positive_points) if prompt.positive_points else 0
         negative_count = len(prompt.negative_points) if prompt.negative_points else 0
         logger.info(f"Preview mask requested with {positive_count} positive points and {negative_count} negative points")
 
-        if positive_count > 0:
-            # Log a few points for debugging
-            for i, pt in enumerate(prompt.positive_points[:2]):
-                logger.info(f"Positive point {i}: x={pt.x}, y={pt.y}")
-
-        # Get the predictor (initializes once)
-        predictor = get_sam2_predictor()
-
         # Get user-specific identifier
         user_id = get_user_id(request)
 
-        # Make sure this user has their own clean cache for this image
-        ensure_clean_image_cache(user_id, prompt.image_path)
-
-        # Initialize user's cache if not exists
-        if user_id not in image_embedding_cache:
-            image_embedding_cache[user_id] = {}
-
-        user_cache = image_embedding_cache[user_id]
-
-        # Only set the image if it's not in the user's cache
-        if prompt.image_path not in user_cache:
-            # Set image
-            logger.info(f"For numpy array image, we assume (HxWxC) format")
-            image = np.array(open_image(prompt.image_path))
-            original_size = image.shape[:2]  # Store original size (height, width)
-            logger.info(f"Image shape: {original_size}")
-
-            # Set image in predictor and save embeddings in cache
-            logger.info(f"Computing image embeddings for the provided image...")
-            predictor.set_image(image)
-            logger.info(f"Image embeddings computed.")
-
-            # Store in cache with timestamp
-            user_cache[prompt.image_path] = {
-                'original_size': original_size,
-                'timestamp': time.time(),
-                'masks': {}  # Initialize masks dictionary for this image
-            }
-
-            logger.info(f"Image embeddings computed for user {user_id}, image: {prompt.image_path}")
-        else:
-            # Update timestamp on cache hit
-            user_cache[prompt.image_path]['timestamp'] = time.time()
-            original_size = user_cache[prompt.image_path]['original_size']
-            logger.info(f"Reusing existing image embeddings for user {user_id}, image: {prompt.image_path}")
-
-            # Make sure we have a masks dictionary
-            if 'masks' not in user_cache[prompt.image_path]:
-                user_cache[prompt.image_path]['masks'] = {}
-
-        # Convert points to format expected by SAM
-        input_points = []
-        input_labels = []
-
-        for point in prompt.positive_points:
-            input_points.append([point.x, point.y])
-            input_labels.append(1)  # 1 for positive
-
-        for point in prompt.negative_points:
-            input_points.append([point.x, point.y])
-            input_labels.append(0)  # 0 for negative
-
-        # Convert to numpy arrays
-        input_points = np.array(input_points)
-        input_labels = np.array(input_labels)
-
-        logger.info(f"Running SAM2 prediction with {len(input_points)} points")
-
-        # Try to use cached logits for this part if available
-        cached_logits = None
-        if prompt.part_name and prompt.part_name in user_cache[prompt.image_path].get('masks', {}):
-            part_cache = user_cache[prompt.image_path]['masks'][prompt.part_name]
-            if 'logits' in part_cache:
-                cached_logits = part_cache['logits']
-                logger.info(f"Found cached logits for part: {prompt.part_name}")
-
-        # Run prediction with cached logits if available
-        if cached_logits is not None:
-            logger.info("Using cached logits for prediction")
-            masks, scores, logits = predictor.predict(
-                point_coords=input_points,
-                point_labels=input_labels,
-                mask_input=cached_logits[None, :, :],  # Add batch dimension
-                multimask_output=True
-            )
-        else:
-            # Standard prediction without mask_input
-            logger.info("Running standard prediction without mask_input")
-            masks, scores, logits = predictor.predict(
-                point_coords=input_points,
-                point_labels=input_labels,
-                multimask_output=True
-            )
-
-        # Get best mask based on score
-        mask_idx = np.argmax(scores)
-        best_score = scores[mask_idx]
-        best_mask = masks[mask_idx]
-        best_logits = logits[mask_idx]
-
-        logger.info(f"Prediction complete. Best mask index: {mask_idx}, score: {best_score:.4f}, mask shape: {best_mask.shape}")
-        logger.info(f"Logits shape: {best_logits.shape}")
-
-        # Save this mask and logits to the cache if we have a part name
-        if prompt.part_name:
-            user_cache[prompt.image_path]['masks'][prompt.part_name] = {
-                'mask': best_mask,
-                'logits': best_logits
-            }
-            logger.info(f"Cached mask and logits for part: {prompt.part_name}")
-
-        # Ensure the mask matches the original image size
-        if original_size and best_mask.shape != original_size:
-            logger.warning(f"Mask size mismatch: {best_mask.shape} vs original {original_size}")
-            # Resize mask if needed (should be handled by SAM2 already but just in case)
-            from PIL import Image
-            pil_mask = Image.fromarray(best_mask.astype(np.uint8) * 255)
-            pil_mask = pil_mask.resize((original_size[1], original_size[0]), Image.NEAREST)
-            best_mask = np.array(pil_mask) > 0
-
-        # Check if mask contains any positive pixels
-        mask_sum = np.sum(best_mask)
-        logger.info(f"Mask sum (number of positive pixels): {mask_sum}")
-
-        if mask_sum == 0:
-            logger.warning("Mask is empty (all zeros)")
-
-        # Convert to RLE
-        fortran_mask = np.asfortranarray(best_mask.astype(np.uint8))
-        rle = mask_utils.encode(fortran_mask)
-
-        # Create RLE annotation
-        rle_annotation = RLEAnnotation(
-            counts=rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-            size=rle['size'],
-            image_path=prompt.image_path,
-            is_root_concept=False
+        # Process the point prompt to get a mask
+        best_mask, best_score, _ = process_point_prompt(
+            prompt.image_path,
+            user_id,
+            prompt.positive_points,
+            prompt.negative_points,
+            prompt.part_name
         )
 
-        # Log the RLE data for debugging
-        logger.info(f"Generated RLE annotation with size: {rle['size']}")
-
-        counts_preview = rle['counts']
-        if isinstance(counts_preview, bytes):
-            counts_preview = counts_preview.decode('utf-8')
-        logger.info(f"RLE counts preview: {counts_preview[:30]}...")
-
-        # Use helper function to convert to dict
-        rle_dict = rle_to_dict(rle_annotation)
+        # Convert mask to RLE format
+        rle_dict = create_rle_from_mask(best_mask, prompt.image_path)
         logger.info(f"RLE dict created with keys: {list(rle_dict.keys())}")
-
-        # Ensure all required fields are present and have values
-        if 'counts' not in rle_dict or rle_dict['counts'] is None:
-            rle_dict['counts'] = counts_preview
-            logger.warning(f"RLE counts was missing or None, setting from original: {counts_preview[:30]}...")
-
-        if 'size' not in rle_dict or rle_dict['size'] is None:
-            rle_dict['size'] = rle['size']
-            logger.warning(f"RLE size was missing or None, setting from original: {rle['size']}")
-
-        # Double-check the final RLE dict
-        logger.info(f"Final RLE dict: {rle_dict}")
 
         return {
             "rle": rle_dict,
-            "score": float(scores[mask_idx])
+            "score": float(best_score)
         }
 
     except Exception as e:
         logger.error(f"Error generating preview mask from points: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -937,89 +403,18 @@ async def preview_mask_from_polygon(prompt: PolygonPrompt, request: Request):
     Similar to generate_mask_from_polygon but doesn't save the result.
     """
     try:
-        # Run cache cleanup on each request
-        cleanup_old_cache_entries()
-
-        from dataset.annotation import RLEAnnotation
-        import cv2
-        from pycocotools import mask as mask_utils
-
         # Get user-specific identifier
         user_id = get_user_id(request)
         logger.info(f"Processing polygon preview for user: {user_id}")
 
-        # Make sure this user has their own clean cache for this image
-        ensure_clean_image_cache(user_id, prompt.image_path)
+        # Process the polygon to get a mask
+        mask = process_polygon_prompt(prompt.image_path, user_id, prompt.polygon_points)
 
-        # Initialize user's cache if not exists
-        if user_id not in image_embedding_cache:
-            image_embedding_cache[user_id] = {}
-
-        user_cache = image_embedding_cache[user_id]
-
-        # Only open the image if it's not in the user's cache
-        if prompt.image_path not in user_cache:
-            # Open image to get dimensions
-            image = np.array(open_image(prompt.image_path))
-            height, width = image.shape[:2]
-
-            # Store in cache with timestamp
-            user_cache[prompt.image_path] = {
-                'original_size': (height, width),
-                'timestamp': time.time(),
-                'masks': {}  # Initialize masks dictionary
-            }
-
-            logger.info(f"Image size computed for user {user_id}, image: {prompt.image_path}")
-        else:
-            # Update timestamp on cache hit
-            user_cache[prompt.image_path]['timestamp'] = time.time()
-            height, width = user_cache[prompt.image_path]['original_size']
-            logger.info(f"Reusing existing image size for user {user_id}, image: {prompt.image_path}")
-
-            # Ensure we have a masks dictionary
-            if 'masks' not in user_cache[prompt.image_path]:
-                user_cache[prompt.image_path]['masks'] = {}
-
-        # Create empty mask for the polygon
-        mask = np.zeros((height, width), dtype=np.uint8)
-
-        # Convert points to format expected by cv2
-        polygon_points = []
-        for point in prompt.polygon_points:
-            polygon_points.append([point.x, point.y])
-
-        # Draw filled polygon
-        points = np.array(polygon_points, dtype=np.int32)
-        cv2.fillPoly(mask, [points], 1)
-
-        # Ensure the mask matches the original image dimensions
-        original_size = user_cache[prompt.image_path]['original_size']
-        if original_size and (mask.shape[0] != original_size[0] or mask.shape[1] != original_size[1]):
-            logger.warning(f"Mask size mismatch: {mask.shape} vs original {original_size}")
-            # Resize mask if needed
-            from PIL import Image
-            pil_mask = Image.fromarray(mask)
-            pil_mask = pil_mask.resize((original_size[1], original_size[0]), Image.NEAREST)
-            mask = np.array(pil_mask) > 0
-
-        # Convert to RLE (Run-Length Encoding)
-        fortran_mask = np.asfortranarray(mask.astype(np.uint8))
-        rle = mask_utils.encode(fortran_mask)
-
-        # Create RLE annotation
-        rle_annotation = RLEAnnotation(
-            counts=rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
-            size=rle['size'],
-            image_path=prompt.image_path,
-            is_root_concept=False
-        )
-
-        # Use helper function to convert to dict
-        rle_dict = rle_to_dict(rle_annotation)
+        # Convert mask to RLE format
+        rle_dict = create_rle_from_mask(mask, prompt.image_path)
 
         # Log success
-        logger.info(f"Successfully generated polygon mask with dimensions {mask.shape}")
+        logger.info(f"Successfully generated polygon mask preview")
 
         return {
             "rle": rle_dict
@@ -1027,7 +422,6 @@ async def preview_mask_from_polygon(prompt: PolygonPrompt, request: Request):
 
     except Exception as e:
         logger.error(f"Error generating mask from polygon: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

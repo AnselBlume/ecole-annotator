@@ -2,7 +2,7 @@ import numpy as np
 import logging
 import json
 import traceback
-from typing import Dict, Union, List, Optional
+from typing import Dict, Union, List, Optional, Any
 from PIL import Image
 from pycocotools import mask as mask_utils
 
@@ -182,3 +182,95 @@ def combine_masks(masks: List[np.ndarray]) -> np.ndarray:
         combined = np.logical_or(combined, mask).astype(np.uint8)
 
     return combined
+
+def rle_to_dict(rle_annotation) -> Dict[str, Any]:
+    """
+    Convert an RLE annotation to a dictionary, handling different Pydantic versions
+    and object types.
+    """
+    try:
+        # Get basic attributes using different methods depending on the object type
+        if hasattr(rle_annotation, "model_dump"):
+            # For newer Pydantic versions (v2+)
+            result = rle_annotation.model_dump()
+        elif hasattr(rle_annotation, "dict"):
+            # For older Pydantic versions (v1)
+            result = rle_annotation.dict()
+        elif hasattr(rle_annotation, "__dict__"):
+            # Fallback for objects with __dict__ attribute
+            result = vars(rle_annotation)
+        else:
+            # Manual conversion
+            result = {}
+
+        # Always directly access the attributes to ensure we get the values
+        # These are the critical fields we need for RLE data
+        if hasattr(rle_annotation, "counts"):
+            result["counts"] = rle_annotation.counts
+        if hasattr(rle_annotation, "size"):
+            result["size"] = rle_annotation.size
+        if hasattr(rle_annotation, "image_path"):
+            result["image_path"] = rle_annotation.image_path
+        if hasattr(rle_annotation, "is_root_concept"):
+            result["is_root_concept"] = rle_annotation.is_root_concept
+
+        # Verify we have the critical fields with valid values
+        if "counts" not in result or result["counts"] is None:
+            logger.error(f"Missing 'counts' in RLE data: {result}")
+            raise ValueError("Missing 'counts' field in RLE data")
+
+        if "size" not in result or result["size"] is None:
+            logger.error(f"Missing 'size' in RLE data: {result}")
+            raise ValueError("Missing 'size' field in RLE data")
+
+        # Ensure size is a list with 2 elements
+        if not isinstance(result["size"], list) or len(result["size"]) != 2:
+            logger.error(f"Invalid 'size' format in RLE data: {result['size']}")
+            raise ValueError(f"Invalid 'size' format in RLE data: {result['size']}")
+
+        # Log success
+        logger.debug(f"Successfully converted RLE data: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in rle_to_dict: {e}")
+        # Re-raise the exception so we can handle it properly
+        raise
+
+def create_rle_from_mask(mask: np.ndarray, image_path: str) -> Dict[str, Any]:
+    """
+    Convert a binary mask to RLE format
+    """
+    from pycocotools import mask as mask_utils
+    from dataset.annotation import RLEAnnotation
+
+    try:
+        # Convert to RLE
+        fortran_mask = np.asfortranarray(mask.astype(np.uint8))
+        rle = mask_utils.encode(fortran_mask)
+
+        # Create RLE annotation
+        rle_annotation = RLEAnnotation(
+            counts=rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts'],
+            size=rle['size'],
+            image_path=image_path,
+            is_root_concept=False
+        )
+
+        # Convert to dict
+        rle_dict = rle_to_dict(rle_annotation)
+
+        return rle_dict
+    except Exception as e:
+        logger.error(f"Error creating RLE from mask: {e}")
+
+        # Create a direct dictionary as fallback
+        counts = rle['counts'].decode() if isinstance(rle['counts'], bytes) else rle['counts']
+        direct_rle = {
+            "counts": counts,
+            "size": rle['size'],
+            "image_path": image_path,
+            "is_root_concept": False
+        }
+
+        return direct_rle

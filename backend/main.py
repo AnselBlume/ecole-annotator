@@ -9,7 +9,8 @@ from services.image_queue import initialize_queue
 from services.annotator import load_annotation_state, save_annotation_state
 from routes.mask_rendering import router as render_mask_router
 from routes.image_queue import router as image_queue_router
-from routes.annotation import router as annotation_router, get_sam2_predictor
+from routes.annotation import router as annotation_router
+from services.sam_predictor import get_sam2_predictor
 import logging
 import coloredlogs
 
