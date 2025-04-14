@@ -387,7 +387,7 @@ export default function SegmentationReviewApp() {
             {/* Part selection sidebar */}
             <div className="bg-gray-50 p-4 rounded-md">
               <h3 className="font-medium text-gray-700 mb-3">Parts</h3>
-              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="space-y-6 max-h-[60vh] overflow-y-auto p-2">
                 {Object.entries(imageData.parts).map(([partName, part]) => {
                   const status = getPartStatus(partName);
                   const hasAnnotations = part.rles && part.rles.length > 0;
@@ -396,7 +396,7 @@ export default function SegmentationReviewApp() {
                   return (
                     <div
                       key={partName}
-                      className={`rounded-md border overflow-hidden ${!hasAnnotations ? 'border-dashed border-gray-300' : 'border-gray-200'} ${isActive ? 'ring-2 ring-blue-300' : ''}`}
+                      className={`rounded-md border m-1 ${!hasAnnotations ? 'border-dashed border-gray-300' : 'border-gray-200'} ${isActive ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`}
                     >
                       <div
                         onClick={() => setActivePart(partName)}
