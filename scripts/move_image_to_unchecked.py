@@ -3,9 +3,9 @@ from utils import backup_annotations, load_annotations, save_annotations
 def move_image_to_unchecked(annotations: dict, debug_img_path: str, clear_unchecked: bool = False) -> dict:
     # Find the annotation
     try:
-        img_dict = annotations['unchecked'][debug_img_path]
+        img_dict = annotations['checked'].pop(debug_img_path)
     except KeyError:
-        img_dict = annotations['checked'][debug_img_path]
+        img_dict = annotations['unchecked'].pop(debug_img_path)
 
     for part, part_dict in img_dict['parts'].items():
         part_dict['was_checked'] = False
