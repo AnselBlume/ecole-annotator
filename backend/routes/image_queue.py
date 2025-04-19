@@ -56,15 +56,25 @@ def reload_queue():
 @router.get('/next-image')
 def get_next_image():
     '''Get the next image from the queue without locking it.'''
+    queue_length = r.llen(IMAGE_QUEUE_KEY)
+    logger.info(f"Queue length: {queue_length}")
+
     while r.llen(IMAGE_QUEUE_KEY) > 0:
         image_json = r.lpop(IMAGE_QUEUE_KEY)
         if image_json:
             image_data: ImageAnnotation = json.loads(image_json)
+            logger.info(f"Processing image: {image_data['image_path']}")
+
             try:
                 image_lock = acquire_image_lock(image_data['image_path'])
                 if not image_lock:
-                    # If we can't acquire the lock, skip this image and try the next one
                     logger.warning(f'Could not acquire lock for image {image_data["image_path"]}, skipping')
+                    continue
+
+                annotated = is_image_annotated(image_data['image_path'])
+                logger.info(f"Is image already annotated: {annotated}")
+                if annotated:
+                    logger.info(f"Skipping already annotated image: {image_data['image_path']}")
                     continue
 
                 try:

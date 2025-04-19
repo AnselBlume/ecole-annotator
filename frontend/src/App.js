@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Header } from "./components/ui/header"
 import ModularAnnotationMode from "./components/ModularAnnotationMode"
 import ImageDisplay from "./components/ImageDisplay"
@@ -25,6 +25,7 @@ export default function SegmentationReviewApp() {
   const [loading, setLoading] = useState(true)
   const [isAnnotating, setIsAnnotating] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const isFetchingRef = useRef(false) // Prevent multiple simultaneous requests
 
   useEffect(() => {
     fetchNextImage()
@@ -41,9 +42,19 @@ export default function SegmentationReviewApp() {
   }
 
   const fetchNextImage = async () => {
+    // Prevent concurrent requests
+    if (isFetchingRef.current) {
+      console.log("Skipping fetchNextImage - request already in progress")
+      return
+    }
+
+    isFetchingRef.current = true
     setLoading(true)
+
     try {
+      console.log("Fetching next image...")
       const data = await apiService.fetchNextImage()
+      console.log("Received image data:", data)
 
       if (!data?.image_path) {
         setImageData(null)
@@ -68,6 +79,7 @@ export default function SegmentationReviewApp() {
       console.error("Failed to fetch next image:", error)
     } finally {
       setLoading(false)
+      isFetchingRef.current = false
     }
   }
 
