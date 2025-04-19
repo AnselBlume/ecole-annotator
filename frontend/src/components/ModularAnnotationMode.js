@@ -625,7 +625,7 @@ export default function ModularAnnotationMode({
       <div className="mt-6 flex justify-end">
         <Button
           onClick={handleSaveAllMasks}
-          disabled={isLoading || !masks.some(mask => mask.rle !== null)}
+          disabled={isLoading}
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
           {isLoading ? "Saving..." : "Save All Masks"}
