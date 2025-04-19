@@ -137,7 +137,4 @@ def is_image_annotated(image_path: str) -> bool:
     return r.exists(f'{IMAGE_ANNOTATED_PREFIX}{image_path}')
 
 def image_path_to_part_labels(image_path: str) -> list[str]:
-    logger.info(f'Image path in path to label? {image_path in _img_path_to_label}')
-    logger.info(f'Image path to label: {_img_path_to_label[image_path]}')
-
     return _object_label_to_parts[_img_path_to_label[image_path]]

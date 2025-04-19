@@ -77,7 +77,6 @@ def get_next_image():
                         logger.info(f'All possible parts for image {image_data["image_path"]}: {all_possible_parts}')
 
                         # Add missing parts with empty RLEs
-                        from model import PartAnnotation
                         for part_name in all_possible_parts:
                             if part_name not in image_data['parts']:
                                 # Add placeholder for part with no existing annotations
@@ -86,7 +85,7 @@ def get_next_image():
                                     'rles': [],
                                     'was_checked': False,
                                     'is_poor_quality': False,
-                                    'is_correct': None,
+                                    'is_correct': True,
                                     'is_complete': True,
                                     'has_existing_annotations': False  # Flag to indicate this is a new part with no existing annotations
                                 }
@@ -111,6 +110,7 @@ def get_next_image():
 def _handle_resize(image_data: ImageAnnotation):
     # Note that this is really a dict of type ImageAnnotation
     nr, image = needs_resize(image_data['image_path'])
+    logger.debug(f'Image data before: {image_data}')
     if not nr:
         return image_data
 
@@ -171,6 +171,8 @@ def _handle_resize(image_data: ImageAnnotation):
 
     finally:
         release_lock(annotation_state_lock)
+
+    logger.debug(f'Image data after: {image_data}')
 
     return image_data
 
