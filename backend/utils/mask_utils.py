@@ -124,7 +124,7 @@ def create_mask_image(
     base_image: Optional[Image.Image] = None,
     overlay: bool = True,
     color: str = 'red',
-    alpha: float = 0.7
+    alpha: float = 0.8
 ) -> Image.Image:
     """Create a mask image from a binary mask array, with optional overlay on base image"""
     # Stack mask to expected format for image_from_masks
