@@ -8,7 +8,7 @@ from typing import Any, Optional
 from services.redis_client import r, acquire_lock
 import logging
 from model import PartAnnotation, ImageAnnotation
-from dataset.utils import is_part_name
+from dataset.utils import get_object_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +72,9 @@ def load_annotation_state():
     # Need mapping from image label to obejct label to display on annotator interface
     global _img_path_to_label, _object_label_to_parts
     _img_path_to_label = { # Mapping from image path to object label
-        path : label
+        path : get_object_prefix(label)
         for label, paths in annotations.img_paths_by_label.items()
         for path in paths
-        if not is_part_name(label)
     }
     # Use the object_label_to_part_labels mapping from annotations instead of building our own
     _object_label_to_parts = {obj_label: sorted(part_labels) for obj_label, part_labels in annotations.object_label_to_part_labels.items()}

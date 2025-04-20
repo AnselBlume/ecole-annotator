@@ -78,9 +78,6 @@ def get_next_image():
                     continue
 
                 try:
-                    if is_image_annotated(image_data['image_path']):
-                        continue
-
                     # Get object class from image path to find all possible parts
                     try:
                         all_possible_parts = image_path_to_part_labels(image_data['image_path'])
@@ -103,7 +100,7 @@ def get_next_image():
                                 # Mark existing parts
                                 image_data['parts'][part_name]['has_existing_annotations'] = True
                     except Exception as e:
-                        logger.warning(f"Error adding all possible parts: {e}")
+                        logger.error(f"Error adding all possible parts: {e}")
                         # Continue even if we can't add all parts
 
                     image_data = _handle_resize(image_data) # This overwrites the 'parts' and 'image_path' fields
