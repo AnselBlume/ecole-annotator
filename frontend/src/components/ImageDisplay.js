@@ -72,43 +72,33 @@ const ImageDisplay = ({
           </div>
         </div>
       ) : (
-        <div className="relative">
-          {/* Display original image with the same dimensions as masked images */}
-          <img
-            src={apiService.getOriginalImageUrl(imageData.image_path)}
-            alt="Original image"
-            className="max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md"
-          />
+        <div className="flex flex-col items-center">
+          <div className="relative mb-4">
+            {/* Display original image without overlay */}
+            <img
+              src={apiService.getOriginalImageUrl(imageData.image_path)}
+              alt="Original image"
+              className="max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md"
+            />
 
-          {/* Semi-transparent overlay with message */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center p-6 bg-white/60 rounded-lg shadow-md max-w-sm backdrop-blur-sm">
-              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-              </svg>
-              <h3 className="mt-2 text-sm font-medium text-gray-700">No annotations for {activePart.split("--part:")[1] || activePart}</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Click the button below to create annotations for this part.
-              </p>
-              <div className="mt-6">
-                <button
-                  type="button"
-                  className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                  onClick={onStartAnnotation}
-                >
-                  <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                  </svg>
-                  Add Annotation
-                </button>
-              </div>
+            <div className="absolute top-2 left-2">
+              <Badge variant="secondary" className="bg-white/90 shadow-sm border border-gray-200">
+                {activePart.split("--part:")[1] || activePart}
+              </Badge>
             </div>
           </div>
 
-          <div className="absolute top-2 left-2">
-            <Badge variant="secondary" className="bg-white/90 shadow-sm border border-gray-200">
-              {activePart.split("--part:")[1] || activePart}
-            </Badge>
+          {/* Add Annotation button below the image instead of as an overlay */}
+          <div className="mt-2 mb-4">
+            <Button
+              onClick={onStartAnnotation}
+              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              Add Annotation
+            </Button>
           </div>
         </div>
       )}
