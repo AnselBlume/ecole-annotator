@@ -18,6 +18,17 @@ export const fetchStats = async () => {
 };
 
 /**
+ * Fetch the object label for an image
+ */
+export const fetchObjectLabel = async (imagePath) => {
+  const res = await fetch(`${BASE_URL}/annotate/object-label?image_path=${encodeURIComponent(imagePath)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch object label: ${res.status} ${res.statusText}`);
+  }
+  return await res.json();
+};
+
+/**
  * Save annotation data
  */
 export const saveAnnotation = async (payload) => {
@@ -57,6 +68,7 @@ export { BASE_URL };
 export default {
   fetchNextImage,
   fetchStats,
+  fetchObjectLabel,
   saveAnnotation,
   getMaskImageUrl,
   getOriginalImageUrl,

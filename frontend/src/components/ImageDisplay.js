@@ -5,6 +5,7 @@ import * as apiService from "../services/api";
 
 const ImageDisplay = ({
   imageData,
+  objectLabel,
   activePart,
   onSkip,
   onSave,
@@ -16,6 +17,11 @@ const ImageDisplay = ({
   return (
     <div className="flex flex-col items-center">
       <div className="mb-4 w-full">
+        {objectLabel && (
+          <h2 className="text-lg font-medium text-gray-900 mb-2">
+            Object Label: <span className="font-semibold text-blue-600">{objectLabel}</span>
+          </h2>
+        )}
         <h2 className="text-lg font-medium text-gray-900">
           Current Image: <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{fileName}</span>
         </h2>

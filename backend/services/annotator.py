@@ -136,4 +136,16 @@ def is_image_annotated(image_path: str) -> bool:
     return r.exists(f'{IMAGE_ANNOTATED_PREFIX}{image_path}')
 
 def image_path_to_part_labels(image_path: str) -> list[str]:
-    return _object_label_to_parts[_img_path_to_label[image_path]]
+    return object_label_to_parts(image_path_to_label(image_path))
+
+def image_path_to_label(image_path: str) -> str:
+    try:
+        return _img_path_to_label[image_path]
+    except KeyError:
+        raise ValueError(f'Image path {image_path} not found in _img_path_to_label')
+
+def object_label_to_parts(object_label: str) -> list[str]:
+    try:
+        return _object_label_to_parts[object_label]
+    except KeyError:
+        raise ValueError(f'Object label {object_label} not found in _object_label_to_parts')

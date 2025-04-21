@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status, APIRouter, Request
+from fastapi import HTTPException, status, APIRouter, Request, Query
 from model import ImageAnnotation, ImageQualityUpdate, PointPrompt, PolygonPrompt
 from services.annotator import (
     get_annotation_state,
@@ -6,7 +6,8 @@ from services.annotator import (
     acquire_annotation_state_lock,
     acquire_image_lock,
     mark_image_as_annotated,
-    save_annotation_state
+    save_annotation_state,
+    image_path_to_label
 )
 from services.redis_client import release_lock, LockAcquisitionError
 from services.sam_predictor import (
@@ -106,6 +107,19 @@ def get_annotation_stats():
     except AnnotationStateError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get('/object-label')
+def get_object_label(image_path: str = Query(..., description="The path to the image")):
+    '''Get the object label for an image.'''
+    try:
+        return {
+            'object_label': image_path_to_label(image_path)
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
 

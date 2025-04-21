@@ -19,6 +19,7 @@ import {
 
 export default function SegmentationReviewApp() {
   const [imageData, setImageData] = useState(null)
+  const [objectLabel, setObjectLabel] = useState(null)
   const [activePart, setActivePart] = useState(null)
   const [qualityStatus, setQualityStatus] = useState({})
   const [stats, setStats] = useState(null)
@@ -50,6 +51,7 @@ export default function SegmentationReviewApp() {
 
     isFetchingRef.current = true
     setLoading(true)
+    setObjectLabel(null)
 
     try {
       console.log("Fetching next image...")
@@ -75,6 +77,14 @@ export default function SegmentationReviewApp() {
         }
       })
       setQualityStatus(statusMap)
+
+      // Fetch the object label for the image
+      try {
+        const labelData = await apiService.fetchObjectLabel(data.image_path)
+        setObjectLabel(labelData.object_label)
+      } catch (error) {
+        console.error("Failed to fetch object label:", error)
+      }
     } catch (error) {
       console.error("Failed to fetch next image:", error)
     } finally {
@@ -234,6 +244,9 @@ export default function SegmentationReviewApp() {
         <Header stats={stats} />
         <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
           <div className="mb-4">
+            {objectLabel && (
+              <h2 className="text-lg font-medium text-gray-900 mb-2">Object: <span className="font-semibold text-blue-600">{objectLabel}</span></h2>
+            )}
             <h2 className="text-lg font-medium text-gray-900">Current Image: <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{imageData.image_path ? imageData.image_path.split('/').pop() : ''}</span></h2>
           </div>
           <ModularAnnotationMode
@@ -258,6 +271,7 @@ export default function SegmentationReviewApp() {
             {/* Main image display area */}
             <ImageDisplay
               imageData={imageData}
+              objectLabel={objectLabel}
               activePart={activePart}
               onSkip={handleSkip}
               onSave={handleSave}
