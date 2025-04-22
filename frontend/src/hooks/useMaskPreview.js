@@ -32,6 +32,7 @@ export default function useMaskPreview(baseURL, imageData) {
         headers: {
           "Content-Type": "application/json"
         },
+        credentials: "include", // Include session cookie
         body: JSON.stringify({
           image_path: imageData.image_path,
           rle_data: rleData,
@@ -57,7 +58,9 @@ export default function useMaskPreview(baseURL, imageData) {
         console.error("Base64 preview request failed:", previewResponse.statusText);
 
         // Try the debug endpoint as fallback
-        const debugResponse = await fetch(`${baseURL}/mask/debug-render-test?image_path=${encodeURIComponent(imageData.image_path)}&t=${Date.now()}`);
+        const debugResponse = await fetch(`${baseURL}/mask/debug-render-test?image_path=${encodeURIComponent(imageData.image_path)}&t=${Date.now()}`, {
+          credentials: "include", // Include session cookie
+        });
         if (debugResponse.ok) {
           const debugResult = await debugResponse.json();
           if (debugResult.base64_image) {

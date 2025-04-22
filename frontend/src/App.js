@@ -23,6 +23,7 @@ export default function SegmentationReviewApp() {
   const [activePart, setActivePart] = useState(null)
   const [qualityStatus, setQualityStatus] = useState({})
   const [stats, setStats] = useState(null)
+  const [userStats, setUserStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isAnnotating, setIsAnnotating] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
@@ -31,6 +32,7 @@ export default function SegmentationReviewApp() {
   useEffect(() => {
     fetchNextImage()
     fetchStats()
+    fetchUserStats()
   }, [])
 
   const fetchStats = async () => {
@@ -39,6 +41,15 @@ export default function SegmentationReviewApp() {
       setStats(data)
     } catch (error) {
       console.error("Failed to fetch stats:", error)
+    }
+  }
+
+  const fetchUserStats = async () => {
+    try {
+      const data = await apiService.fetchUserStats()
+      setUserStats(data)
+    } catch (error) {
+      console.error("Failed to fetch user stats:", error)
     }
   }
 
@@ -185,6 +196,7 @@ export default function SegmentationReviewApp() {
       // Only fetch next image and stats if save was successful
       fetchNextImage()
       fetchStats()
+      fetchUserStats()
     } catch (error) {
       console.error("Failed to save annotation:", error)
     } finally {
@@ -230,18 +242,18 @@ export default function SegmentationReviewApp() {
   }
 
   if (loading) {
-    return <LoadingState stats={stats} />
+    return <LoadingState stats={stats} userStats={userStats} />
   }
 
   if (!imageData) {
-    return <EmptyState stats={stats} />
+    return <EmptyState stats={stats} userStats={userStats} />
   }
 
   // If in annotation mode, show the annotation interface
   if (isAnnotating && activePart) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header stats={stats} />
+        <Header stats={stats} userStats={userStats} />
         <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
           <div className="mb-4">
             {objectLabel && (
@@ -263,7 +275,7 @@ export default function SegmentationReviewApp() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header stats={stats} />
+      <Header stats={stats} userStats={userStats} />
 
       <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6">
         <div className="bg-white rounded-lg shadow-sm">

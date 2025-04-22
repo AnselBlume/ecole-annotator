@@ -9,7 +9,7 @@ from services.annotator import (
     save_annotation_state,
     image_path_to_label
 )
-from services.redis_client import release_lock, LockAcquisitionError
+from services.redis_client import release_lock, LockAcquisitionError, r
 from services.sam_predictor import (
     get_user_id,
     process_point_prompt,
@@ -25,10 +25,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post('/save-annotation')
-def save_annotation(annotation: ImageAnnotation):
+def save_annotation(annotation: ImageAnnotation, request: Request):
     '''Save an annotation with proper locking.'''
     # First, try to acquire a lock for this specific image
     try:
+        # Get the user ID from the session cookie
+        user_id = get_user_id(request)
+
         image_lock = acquire_image_lock(annotation.image_path)
         if not image_lock:
             raise HTTPException(
@@ -48,6 +51,9 @@ def save_annotation(annotation: ImageAnnotation):
             try:
                 annotation_state = get_annotation_state()
 
+                # Check if this is a new annotation (not previously in checked)
+                is_new_annotation = annotation.image_path not in annotation_state.checked
+
                 if annotation.image_path in annotation_state.unchecked:
                     del annotation_state.unchecked[annotation.image_path]
 
@@ -55,6 +61,12 @@ def save_annotation(annotation: ImageAnnotation):
 
                 save_annotation_state(annotation_state)
                 mark_image_as_annotated(annotation.image_path)
+
+                # Increment user's annotation count if it's a new annotation
+                if is_new_annotation:
+                    user_count_key = f"user_annotation_count:{user_id}"
+                    r.incr(user_count_key)
+                    logger.info(f"Incremented annotation count for user {user_id}")
 
                 # Clear any cached masks for this image across all users
                 clear_user_cache_for_image(annotation.image_path)
@@ -108,6 +120,28 @@ def get_annotation_stats():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+@router.get('/user-annotation-count')
+def get_user_annotation_count(request: Request):
+    '''Get the number of images annotated by the current user based on session cookie.'''
+    try:
+        user_id = get_user_id(request)
+
+        # Get the key for storing user's annotation count
+        user_count_key = f"user_annotation_count:{user_id}"
+
+        # Get the count from Redis, default to 0 if not exists
+        user_count = int(r.get(user_count_key) or 0)
+
+        return {
+            'user_count': user_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting user annotation count: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user annotation count: {str(e)}"
         )
 
 @router.get('/object-label')

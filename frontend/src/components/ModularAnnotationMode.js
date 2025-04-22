@@ -310,6 +310,7 @@ export default function ModularAnnotationMode({
       const response = await fetch(`${baseURL}/mask/generate-from-polygon`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // Include session cookie
         body: JSON.stringify({
           image_path: imageData.image_path,
           points: formattedPoints
@@ -484,6 +485,7 @@ export default function ModularAnnotationMode({
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // Include session cookie
         body: JSON.stringify(requestBody)
       });
 

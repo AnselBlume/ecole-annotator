@@ -4,7 +4,12 @@ const BASE_URL = process.env.REACT_APP_BACKEND;
  * Fetch the next image to annotate
  */
 export const fetchNextImage = async () => {
-  const res = await fetch(`${BASE_URL}/queue/next-image`);
+  const res = await fetch(
+    `${BASE_URL}/queue/next-image`,
+    {
+      credentials: 'include',
+    }
+  );
   const data = await res.json();
   return data;
 };
@@ -13,7 +18,25 @@ export const fetchNextImage = async () => {
  * Fetch annotation statistics
  */
 export const fetchStats = async () => {
-  const res = await fetch(`${BASE_URL}/annotate/annotation-stats`);
+  const res = await fetch(
+    `${BASE_URL}/annotate/annotation-stats`,
+    {
+      credentials: 'include',
+    }
+  );
+  return await res.json();
+};
+
+/**
+ * Fetch user annotation count based on session cookie
+ */
+export const fetchUserStats = async () => {
+  const res = await fetch(
+    `${BASE_URL}/annotate/user-annotation-count`,
+    {
+      credentials: 'include',
+    }
+  );
   return await res.json();
 };
 
@@ -21,7 +44,12 @@ export const fetchStats = async () => {
  * Fetch the object label for an image
  */
 export const fetchObjectLabel = async (imagePath) => {
-  const res = await fetch(`${BASE_URL}/annotate/object-label?image_path=${encodeURIComponent(imagePath)}`);
+  const res = await fetch(
+    `${BASE_URL}/annotate/object-label?image_path=${encodeURIComponent(imagePath)}`,
+    {
+      credentials: 'include',
+    }
+  );
   if (!res.ok) {
     throw new Error(`Failed to fetch object label: ${res.status} ${res.statusText}`);
   }
@@ -35,6 +63,7 @@ export const saveAnnotation = async (payload) => {
   const response = await fetch(`${BASE_URL}/annotate/save-annotation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: 'include',
     body: JSON.stringify(payload),
   });
 
@@ -68,6 +97,7 @@ export { BASE_URL };
 export default {
   fetchNextImage,
   fetchStats,
+  fetchUserStats,
   fetchObjectLabel,
   saveAnnotation,
   getMaskImageUrl,
