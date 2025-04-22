@@ -15,7 +15,8 @@ export default function ModularAnnotationMode({
   activePart,
   baseURL,
   onUpdateAnnotation,
-  onCancel
+  onCancel,
+  initialMaskColor = 'aqua'
 }) {
   // Local state
   const [activeTab, setActiveTab] = useState("sam2")
@@ -24,6 +25,7 @@ export default function ModularAnnotationMode({
   const [masks, setMasks] = useState([])
   const [activeMaskIndex, setActiveMaskIndex] = useState(0)
   const [pointsForMasks, setPointsForMasks] = useState({})
+  const [maskColor, setMaskColor] = useState(initialMaskColor)
 
   // Use custom hook for preview handling
   const {
@@ -40,8 +42,8 @@ export default function ModularAnnotationMode({
 
   // Helper function to get mask URL with the correct parameters
   const getMaskUrl = useCallback((maskIndex) => {
-    return getUrlForMask(masks, maskIndex, activePart);
-  }, [getUrlForMask, masks, activePart]);
+    return getUrlForMask(masks, maskIndex, activePart, maskColor);
+  }, [getUrlForMask, masks, activePart, maskColor]);
 
   // Load existing masks on component mount - with proper dependencies
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function ModularAnnotationMode({
       if (initialRle) {
         // Use timeout to avoid render loop
         const timer = setTimeout(() => {
-          updateMaskPreview(initialRle);
+          updateMaskPreview(initialRle, maskColor);
         }, 100);
 
         return () => clearTimeout(timer);
@@ -86,7 +88,7 @@ export default function ModularAnnotationMode({
         partName: activePart
       }]);
     }
-  }, [imageData, activePart, updateMaskPreview]);
+  }, [imageData, activePart, updateMaskPreview, maskColor]);
 
   // Handle point prompts
   const handleSavePoints = async (points) => {
@@ -114,7 +116,8 @@ export default function ModularAnnotationMode({
           image_path: imageData.image_path,
           part_name: activePart,
           positive_points: points.positivePoints,
-          negative_points: points.negativePoints
+          negative_points: points.negativePoints,
+          mask_color: maskColor
         })
       });
 
@@ -171,7 +174,7 @@ export default function ModularAnnotationMode({
 
           // Show fallback preview
           setTimeout(() => {
-            updateMaskPreview(fallbackRle);
+            updateMaskPreview(fallbackRle, maskColor);
           }, 100);
 
           // Show a more informative error
@@ -214,7 +217,7 @@ export default function ModularAnnotationMode({
 
       // Show the new preview
       setTimeout(() => {
-        updateMaskPreview(cleanRle);
+        updateMaskPreview(cleanRle, maskColor);
       }, 100);
     } catch (err) {
       console.error("Error generating mask from points:", err);
@@ -239,7 +242,8 @@ export default function ModularAnnotationMode({
         body: JSON.stringify({
           image_path: imageData.image_path,
           part_name: activePart,
-          polygon_points: polygon.polygonPoints
+          polygon_points: polygon.polygonPoints,
+          mask_color: maskColor
         })
       });
 
@@ -283,7 +287,7 @@ export default function ModularAnnotationMode({
 
       // Show the updated mask
       setTimeout(() => {
-        updateMaskPreview(cleanRle);
+        updateMaskPreview(cleanRle, maskColor);
       }, 100);
     } catch (err) {
       console.error("Error generating mask from polygon:", err);
@@ -294,7 +298,7 @@ export default function ModularAnnotationMode({
   };
 
   // Generate polygon mask for preview
-  const generatePolygonMask = async (points) => {
+  const generatePolygonMask = async (points, color = null) => {
     if (points.length < 3 || isGenerating) {
       console.log("Not enough points or already generating");
       return null;
@@ -313,7 +317,8 @@ export default function ModularAnnotationMode({
         credentials: "include", // Include session cookie
         body: JSON.stringify({
           image_path: imageData.image_path,
-          points: formattedPoints
+          points: formattedPoints,
+          mask_color: color || maskColor
         })
       });
 
@@ -360,9 +365,11 @@ export default function ModularAnnotationMode({
   const handlePreviewMask = async (data) => {
     try {
       let rle = null;
+      // Use the color from data if provided, otherwise use the current state
+      const colorToUse = data.maskColor || maskColor;
 
       if (data.polygonPoints && data.polygonPoints.length >= 3) {
-        rle = await generatePolygonMask(data.polygonPoints);
+        rle = await generatePolygonMask(data.polygonPoints, colorToUse);
       } else if (data.positivePoints && data.positivePoints.length > 0) {
         // Handle point prompts from SAM2
         console.log("Sending SAM2 point prompt for preview");
@@ -372,7 +379,8 @@ export default function ModularAnnotationMode({
           image_path: imageData.image_path,
           part_name: activePart,
           positive_points: data.positivePoints,
-          negative_points: data.negativePoints || []
+          negative_points: data.negativePoints || [],
+          mask_color: colorToUse
         };
 
         // Add existing mask for improved prediction if available
@@ -422,7 +430,7 @@ export default function ModularAnnotationMode({
         setMasks(updatedMasks);
 
         // Update the preview
-        updateMaskPreview(cleanRle);
+        updateMaskPreview(cleanRle, colorToUse);
       }
     } catch (err) {
       console.error("Error in handlePreviewMask:", err);
@@ -436,9 +444,19 @@ export default function ModularAnnotationMode({
 
     // Update the preview for the selected mask
     if (masks[newIndex]?.rle) {
-      updateMaskPreview(masks[newIndex].rle);
+      updateMaskPreview(masks[newIndex].rle, maskColor);
     } else {
       clearPreview();
+    }
+  };
+
+  // Handle mask color change and re-render preview
+  const handleColorChange = (color) => {
+    setMaskColor(color);
+
+    // Re-render the current mask with the new color if a mask exists
+    if (masks[activeMaskIndex]?.rle) {
+      updateMaskPreview(masks[activeMaskIndex].rle, color);
     }
   };
 
@@ -574,6 +592,7 @@ export default function ModularAnnotationMode({
                 onPreviewMask={handlePreviewMask}
                 initialPositivePoints={pointsForMasks[activeMaskIndex]?.positivePoints || []}
                 initialNegativePoints={pointsForMasks[activeMaskIndex]?.negativePoints || []}
+                maskColor={maskColor}
                 className="w-full"
               />
               <div className="mt-4 text-xs text-gray-500">
@@ -582,18 +601,48 @@ export default function ModularAnnotationMode({
               </div>
             </div>
 
-            {/* Use MaskPreview component */}
-            <MaskPreview
-              isLoading={isLoading}
-              masks={masks}
-              activeMaskIndex={activeMaskIndex}
-              previewMask={previewMask}
-              previewBase64Image={previewBase64Image}
-              previewMaskUrl={previewMaskUrl}
-              debugPreviewUrl={debugPreviewUrl}
-              activeTab={activeTab}
-              getMaskUrl={getMaskUrl}
-            />
+            <div className="w-full">
+              <div className="flex justify-end mb-2">
+                <div className="inline-flex rounded-md shadow-sm" role="group">
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("aqua")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-l-lg ${
+                      maskColor === "aqua"
+                        ? "bg-cyan-100 text-cyan-700 border-cyan-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Aqua Mask
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("red")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-r-lg ${
+                      maskColor === "red"
+                        ? "bg-red-100 text-red-700 border-red-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Red Mask
+                  </button>
+                </div>
+              </div>
+
+              {/* Use MaskPreview component */}
+              <MaskPreview
+                isLoading={isLoading}
+                masks={masks}
+                activeMaskIndex={activeMaskIndex}
+                previewMask={previewMask}
+                previewBase64Image={previewBase64Image}
+                previewMaskUrl={previewMaskUrl}
+                debugPreviewUrl={debugPreviewUrl}
+                activeTab={activeTab}
+                getMaskUrl={getMaskUrl}
+                maskColor={maskColor}
+              />
+            </div>
           </div>
         </TabsContent>
 
@@ -607,22 +656,53 @@ export default function ModularAnnotationMode({
                 onSavePolygon={handleSavePolygon}
                 onPreviewMask={handlePreviewMask}
                 initialPolygonPoints={pointsForMasks[activeMaskIndex]?.polygonPoints || []}
+                maskColor={maskColor}
                 className="w-full"
               />
             </div>
 
-            {/* Use MaskPreview component */}
-            <MaskPreview
-              isLoading={isLoading}
-              masks={masks}
-              activeMaskIndex={activeMaskIndex}
-              previewMask={previewMask}
-              previewBase64Image={previewBase64Image}
-              previewMaskUrl={previewMaskUrl}
-              debugPreviewUrl={debugPreviewUrl}
-              activeTab={activeTab}
-              getMaskUrl={getMaskUrl}
-            />
+            <div className="w-full">
+              <div className="flex justify-end mb-2">
+                <div className="inline-flex rounded-md shadow-sm" role="group">
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("aqua")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-l-lg ${
+                      maskColor === "aqua"
+                        ? "bg-cyan-100 text-cyan-700 border-cyan-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Aqua Mask
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("red")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-r-lg ${
+                      maskColor === "red"
+                        ? "bg-red-100 text-red-700 border-red-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Red Mask
+                  </button>
+                </div>
+              </div>
+
+              {/* Use MaskPreview component */}
+              <MaskPreview
+                isLoading={isLoading}
+                masks={masks}
+                activeMaskIndex={activeMaskIndex}
+                previewMask={previewMask}
+                previewBase64Image={previewBase64Image}
+                previewMaskUrl={previewMaskUrl}
+                debugPreviewUrl={debugPreviewUrl}
+                activeTab={activeTab}
+                getMaskUrl={getMaskUrl}
+                maskColor={maskColor}
+              />
+            </div>
           </div>
         </TabsContent>
       </Tabs>

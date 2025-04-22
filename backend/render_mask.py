@@ -15,13 +15,14 @@ from root_utils import open_image
 
 logger = logging.getLogger(__name__)
 
-def get_combined_mask_image(image_path: str, part_names: List[str]) -> PILImage:
+def get_combined_mask_image(image_path: str, part_names: List[str], mask_color: str = 'aqua') -> PILImage:
     '''
     Generate a combined mask image for the given parts of a specific image.
 
     Args:
         image_path: Path to the original image
         part_names: Parts to include in the mask
+        mask_color: Color to use for the mask (default: aqua)
 
     Returns:
         PIL Image object of the combined mask
@@ -56,7 +57,12 @@ def get_combined_mask_image(image_path: str, part_names: List[str]) -> PILImage:
     part_masks = np.stack(part_masks, axis=0) # (num_masks, height, width)
     image = open_image(image_path)
 
-    return image_from_masks(part_masks, superimpose_on_image=image)
+    return image_from_masks(
+        part_masks,
+        superimpose_on_image=image,
+        combine_as_binary_mask=mask_color is not None,
+        combine_color=mask_color
+    )
 
 def get_colors(num_colors, cmap_name='rainbow', as_tuples=False):
     '''

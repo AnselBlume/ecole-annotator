@@ -14,6 +14,7 @@ export default function AnnotationCanvas({
   initialPositivePoints = [],
   initialNegativePoints = [],
   initialPolygonPoints = [],
+  maskColor = 'aqua',
   className
 }) {
   const canvasRef = useRef(null)
@@ -210,13 +211,15 @@ export default function AnnotationCanvas({
             onPreviewMask({
               positivePoints: updatedPositivePoints,
               negativePoints: updatedNegativePoints,
-              requestId: newRequestId
+              requestId: newRequestId,
+              maskColor
             });
           } else if (updatedPolygonPoints.length >= 3) {
             console.log("Triggering preview after polygon point deletion (double-click)");
             onPreviewMask({
               polygonPoints: updatedPolygonPoints,
-              requestId: newRequestId
+              requestId: newRequestId,
+              maskColor
             });
           }
         }, 50);
@@ -270,7 +273,8 @@ export default function AnnotationCanvas({
           onPreviewMask({
             positivePoints: updatedPositivePoints,
             negativePoints: updatedNegativePoints,
-            requestId: newRequestId
+            requestId: newRequestId,
+            maskColor
           });
         }, 50);
       }
@@ -292,7 +296,8 @@ export default function AnnotationCanvas({
           console.log(`Polygon points: ${JSON.stringify(updatedPolygonPoints)}`);
           onPreviewMask({
             polygonPoints: updatedPolygonPoints,
-            requestId: newRequestId
+            requestId: newRequestId,
+            maskColor
           });
         }, 50);
       }
@@ -322,12 +327,14 @@ export default function AnnotationCanvas({
           onPreviewMask({
             positivePoints,
             negativePoints,
-            requestId: currentRequestId
+            requestId: currentRequestId,
+            maskColor
           })
         } else {
           onPreviewMask({
             polygonPoints,
-            requestId: currentRequestId
+            requestId: currentRequestId,
+            maskColor
           })
         }
       }
@@ -567,13 +574,15 @@ export default function AnnotationCanvas({
               onPreviewMask({
                 positivePoints: updatedPositivePoints,
                 negativePoints: updatedNegativePoints,
-                requestId: newRequestId
+                requestId: newRequestId,
+                maskColor
               });
             } else if (updatedPolygonPoints.length >= 3) {
               console.log("Triggering preview after polygon point deletion (keyboard)");
               onPreviewMask({
                 polygonPoints: updatedPolygonPoints,
-                requestId: newRequestId
+                requestId: newRequestId,
+                maskColor
               });
             }
           }, 50);
@@ -614,13 +623,15 @@ export default function AnnotationCanvas({
             onPreviewMask({
               positivePoints: updatedPositivePoints,
               negativePoints: updatedNegativePoints,
-              requestId: newRequestId
+              requestId: newRequestId,
+              maskColor
             });
           } else if (updatedPolygonPoints.length >= 3) {
             console.log("Triggering preview after polygon point deletion");
             onPreviewMask({
               polygonPoints: updatedPolygonPoints,
-              requestId: newRequestId
+              requestId: newRequestId,
+              maskColor
             });
           }
         }, 50);

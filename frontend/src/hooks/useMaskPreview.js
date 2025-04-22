@@ -9,14 +9,14 @@ export default function useMaskPreview(baseURL, imageData) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Generate base64 preview from RLE data
-  const generateBase64Preview = useCallback(async (rleData) => {
+  const generateBase64Preview = useCallback(async (rleData, maskColor = 'aqua') => {
     if (!rleData) {
       console.warn("Cannot generate base64 preview: No RLE data provided");
       return;
     }
 
     try {
-      console.log("Generating base64 preview for mask");
+      console.log(`Generating base64 preview for mask with color: ${maskColor}`);
 
       // Ensure rleData is properly formatted
       if (!rleData.counts || !rleData.size) {
@@ -36,7 +36,8 @@ export default function useMaskPreview(baseURL, imageData) {
         body: JSON.stringify({
           image_path: imageData.image_path,
           rle_data: rleData,
-          overlay: true
+          overlay: true,
+          mask_color: maskColor
         })
       });
 
@@ -75,7 +76,7 @@ export default function useMaskPreview(baseURL, imageData) {
   }, [baseURL, imageData]);
 
   // Create a debounced version of generateBase64Preview to avoid excessive API calls
-  const debouncedGeneratePreview = useCallback((rleData) => {
+  const debouncedGeneratePreview = useCallback((rleData, maskColor = 'aqua') => {
     // Clear any pending timeouts
     if (window.previewTimeoutId) {
       clearTimeout(window.previewTimeoutId);
@@ -83,7 +84,7 @@ export default function useMaskPreview(baseURL, imageData) {
 
     // Set a new timeout
     window.previewTimeoutId = setTimeout(() => {
-      generateBase64Preview(rleData);
+      generateBase64Preview(rleData, maskColor);
     }, 500); // 500ms debounce time
   }, [generateBase64Preview]);
 
@@ -97,9 +98,10 @@ export default function useMaskPreview(baseURL, imageData) {
     // Ensure proper URL encoding
     const encodedPath = encodeURIComponent(imageData.image_path);
     const encodedRle = encodeURIComponent(previewMask.rleData);
-    const url = `${baseURL}/mask/render-preview?overlay=true&image_path=${encodedPath}&rle_data=${encodedRle}&t=${previewMask.timestamp || Date.now()}`;
+    const maskColor = previewMask.maskColor || 'aqua'; // Use the stored color or default to red
+    const url = `${baseURL}/mask/render-preview?overlay=true&image_path=${encodedPath}&rle_data=${encodedRle}&mask_color=${maskColor}&t=${previewMask.timestamp || Date.now()}`;
 
-    console.log("Generated preview mask URL");
+    console.log(`Generated preview mask URL with color: ${maskColor}`);
     return url;
   }, [baseURL, imageData?.image_path, previewMask, isGenerating]);
 
@@ -113,7 +115,7 @@ export default function useMaskPreview(baseURL, imageData) {
   }, [baseURL, imageData, previewMaskUrl]);
 
   // Create URL for viewing masks
-  const getMaskUrl = useCallback((masks, activeMaskIndex, activePart) => {
+  const getMaskUrl = useCallback((masks, activeMaskIndex, activePart, maskColor = 'aqua') => {
     if (activeMaskIndex === null || activeMaskIndex === undefined || !masks[activeMaskIndex]?.rle) {
       return null;
     }
@@ -124,6 +126,9 @@ export default function useMaskPreview(baseURL, imageData) {
     // Always use activePart for the parts parameter
     url += `&parts=${encodeURIComponent(activePart)}`;
 
+    // Add mask color parameter
+    url += `&mask_color=${encodeURIComponent(maskColor)}`;
+
     // Add timestamp to prevent caching
     const timestamp = masks[activeMaskIndex].timestamp || Date.now();
     url += `&t=${timestamp}`;
@@ -132,7 +137,7 @@ export default function useMaskPreview(baseURL, imageData) {
   }, [baseURL, imageData?.image_path]);
 
   // Function to update the preview with a new RLE
-  const updateMaskPreview = useCallback((rle) => {
+  const updateMaskPreview = useCallback((rle, maskColor = 'aqua') => {
     if (!rle) {
       setPreviewMask(null);
       setPreviewBase64Image(null);
@@ -157,10 +162,11 @@ export default function useMaskPreview(baseURL, imageData) {
     setPreviewMask({
       rleData: JSON.stringify(cleanRle),
       timestamp,
-      requestId: timestamp
+      requestId: timestamp,
+      maskColor // Store the mask color
     });
 
-    debouncedGeneratePreview(cleanRle);
+    debouncedGeneratePreview(cleanRle, maskColor);
   }, [debouncedGeneratePreview]);
 
   // Function to clear the preview

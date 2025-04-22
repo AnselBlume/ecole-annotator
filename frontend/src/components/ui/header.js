@@ -15,7 +15,7 @@ export function Header({ stats, userStats }) {
 
             {userStats && (
               <div className="text-xs text-gray-600 mt-1">
-                Your contributions: <span className="font-semibold">{userStats.user_count}</span> images
+                Your contribution: <span className="font-semibold">{userStats.user_count}</span> images
               </div>
             )}
           </div>

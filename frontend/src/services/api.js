@@ -78,10 +78,10 @@ export const saveAnnotation = async (payload) => {
 /**
  * Get mask image URL for specified image path and parts
  */
-export const getMaskImageUrl = (imagePath, parts, timestamp = Date.now()) => {
+export const getMaskImageUrl = (imagePath, parts, maskColor = 'aqua', timestamp = Date.now()) => {
   return `${BASE_URL}/mask/render-mask?image_path=${encodeURIComponent(
     imagePath
-  )}&parts=${encodeURIComponent(parts)}&timestamp=${timestamp}`;
+  )}&parts=${encodeURIComponent(parts)}&mask_color=${encodeURIComponent(maskColor)}&timestamp=${timestamp}`;
 };
 
 /**

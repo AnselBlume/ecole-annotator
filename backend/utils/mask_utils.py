@@ -123,7 +123,7 @@ def create_mask_image(
     mask_array: np.ndarray,
     base_image: Optional[Image.Image] = None,
     overlay: bool = True,
-    color: str = 'red',
+    color: str = 'aqua',
     alpha: float = 0.8
 ) -> Image.Image:
     """Create a mask image from a binary mask array, with optional overlay on base image"""

@@ -32,7 +32,8 @@ router = APIRouter()
 @router.get('/render-mask')
 def render_combined_mask(
     image_path: str = Query(...),
-    parts: str = Query(...)
+    parts: str = Query(...),
+    mask_color: str = Query('aqua')
 ):
     '''
     Dynamically generates a mask image for the selected parts and returns it.
@@ -40,14 +41,15 @@ def render_combined_mask(
     Args:
         image_path: path to the base image
         parts: comma-separated list of part names
+        mask_color: Color to use for the mask (default: aqua)
 
     Returns:
         A streaming JPEG image response
     '''
     try:
         part_list = parts.split(',')
-        logging.info(f'Rendering mask for {image_path} with parts {part_list}')
-        mask_image = get_combined_mask_image(image_path, part_list)
+        logging.info(f'Rendering mask for {image_path} with parts {part_list}, color: {mask_color}')
+        mask_image = get_combined_mask_image(image_path, part_list, mask_color)
 
         return image_response(mask_image)
 
@@ -59,7 +61,8 @@ def render_combined_mask(
 def render_mask_preview(
     image_path: str = Query(...),
     rle_data: str = Query(None),
-    overlay: bool = Query(False)
+    overlay: bool = Query(False),
+    mask_color: str = Query('aqua')
 ):
     '''
     Dynamically renders a mask preview from RLE data.
@@ -69,13 +72,14 @@ def render_mask_preview(
         image_path: path to the base image
         rle_data: RLE data for the mask (JSON string)
         overlay: Whether to overlay the mask on the original image
+        mask_color: Color to use for the mask (default: aqua)
 
     Returns:
         A streaming JPEG image response
     '''
     try:
         # Log the incoming data for debugging
-        logger.info(f"Rendering preview mask for {image_path}, overlay={overlay}")
+        logger.info(f"Rendering preview mask for {image_path}, overlay={overlay}, color={mask_color}")
         if not rle_data:
             logger.info("No RLE data provided")
             return Response(
@@ -110,7 +114,7 @@ def render_mask_preview(
 
         # Create mask image
         try:
-            result_image = create_mask_image(mask, base_image, overlay)
+            result_image = create_mask_image(mask, base_image, overlay, color=mask_color)
         except ValueError as e:
             return error_image_response(f"Error creating mask: {str(e)}")
 
@@ -165,6 +169,7 @@ async def render_preview_base64(request_data: dict):
             - image_path: path to the base image
             - rle_data: RLE data for the mask
             - overlay: Whether to overlay the mask on the original image (default: True)
+            - mask_color: Color to use for the mask (default: aqua)
 
     Returns:
         JSON with base64-encoded mask image
@@ -173,13 +178,14 @@ async def render_preview_base64(request_data: dict):
         image_path = request_data.get("image_path")
         rle_data = request_data.get("rle_data")
         overlay = request_data.get("overlay", True)
+        mask_color = request_data.get("mask_color", "aqua")
 
         if not image_path:
             logger.error("No image_path provided in render_preview_base64")
             return error_response("No image_path provided")
 
         # Log the incoming request data
-        logger.info(f"Rendering base64 preview mask for {image_path}, overlay={overlay}")
+        logger.info(f"Rendering base64 preview mask for {image_path}, overlay={overlay}, color={mask_color}")
         logger.info(f"RLE data type: {type(rle_data)}")
 
         if not rle_data:
@@ -201,7 +207,7 @@ async def render_preview_base64(request_data: dict):
             mask = decode_rle_to_mask(rle_dict)
 
             # Create mask image
-            result_image = create_mask_image(mask, base_image, overlay)
+            result_image = create_mask_image(mask, base_image, overlay, color=mask_color)
 
             # Return base64 image response
             return {
@@ -216,6 +222,7 @@ async def render_preview_base64(request_data: dict):
 
 @router.post('/generate-from-polygon')
 async def generate_mask_from_polygon(request_data: dict):
+    # XXX This does not used anywhere since ModularAnnotationMode calls generate-polygon-mask to get an RLE
     '''
     Generates a mask from a polygon and returns RLE data.
 
@@ -223,6 +230,7 @@ async def generate_mask_from_polygon(request_data: dict):
         request_data: A dictionary containing:
             - image_path: path to the base image
             - points: List of [x, y] coordinates forming the polygon
+            - mask_color: Color of the mask (default: "aqua")
 
     Returns:
         JSON with success status and RLE data for the mask
@@ -230,6 +238,7 @@ async def generate_mask_from_polygon(request_data: dict):
     try:
         image_path = request_data.get("image_path")
         points = request_data.get("points", [])
+        mask_color = request_data.get("mask_color", "aqua")
 
         if not image_path:
             logger.error("No image_path provided in generate_mask_from_polygon")
@@ -239,7 +248,7 @@ async def generate_mask_from_polygon(request_data: dict):
             logger.error(f"Not enough points provided in generate_mask_from_polygon: {len(points) if points else 0}")
             return error_response("At least 3 points required to form a polygon")
 
-        logger.info(f"Generating mask from polygon with {len(points)} points for {image_path}")
+        logger.info(f"Generating mask from polygon with {len(points)} points for {image_path}, color: {mask_color}")
 
         # Load the base image to get dimensions
         try:

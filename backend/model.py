@@ -35,8 +35,10 @@ class PointPrompt(BaseModel):
     positive_points: List[Point]
     negative_points: List[Point] = []
     mask_input: dict = None  # Optional: RLE encoded mask to improve prediction
+    mask_color: str = 'aqua'
 
 class PolygonPrompt(BaseModel):
     image_path: str
     part_name: str
     polygon_points: List[Point]
+    mask_color: str = 'aqua'

@@ -27,7 +27,13 @@ export default function SegmentationReviewApp() {
   const [loading, setLoading] = useState(true)
   const [isAnnotating, setIsAnnotating] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [maskColor, setMaskColor] = useState("aqua")
   const isFetchingRef = useRef(false) // Prevent multiple simultaneous requests
+
+  // Handle mask color change
+  const handleColorChange = (color) => {
+    setMaskColor(color);
+  };
 
   useEffect(() => {
     fetchNextImage()
@@ -267,6 +273,7 @@ export default function SegmentationReviewApp() {
             baseURL={apiService.BASE_URL}
             onUpdateAnnotation={handleUpdateAnnotation}
             onCancel={() => setIsAnnotating(false)}
+            initialMaskColor={maskColor}
           />
         </main>
       </div>
@@ -288,19 +295,51 @@ export default function SegmentationReviewApp() {
               onSkip={handleSkip}
               onSave={handleSave}
               onStartAnnotation={handleStartAnnotation}
+              maskColor={maskColor}
             />
 
-            {/* Part selection sidebar */}
-            <PartsSidebar
-              parts={imageData.parts}
-              activePart={activePart}
-              qualityStatus={qualityStatus}
-              onPartSelect={setActivePart}
-              onStartAnnotation={handleStartAnnotation}
-              onSetCorrectStatus={setCorrectStatus}
-              onTogglePoorQuality={togglePoorQuality}
-              onToggleIncomplete={toggleIncomplete}
-            />
+            {/* Part selection sidebar with color buttons */}
+            <div className="flex flex-col">
+              <div className="mb-4 flex justify-end">
+                <div className="inline-flex rounded-md shadow-sm" role="group">
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("aqua")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-l-lg ${
+                      maskColor === "aqua"
+                        ? "bg-cyan-100 text-cyan-700 border-cyan-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Aqua Mask
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleColorChange("red")}
+                    className={`px-4 py-2 text-sm font-medium border border-gray-200 rounded-r-lg ${
+                      maskColor === "red"
+                        ? "bg-red-100 text-red-700 border-red-300"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Red Mask
+                  </button>
+                </div>
+              </div>
+
+              {/* Part selection sidebar */}
+              <PartsSidebar
+                parts={imageData.parts}
+                activePart={activePart}
+                qualityStatus={qualityStatus}
+                onPartSelect={setActivePart}
+                onStartAnnotation={handleStartAnnotation}
+                onSetCorrectStatus={setCorrectStatus}
+                onTogglePoorQuality={togglePoorQuality}
+                onToggleIncomplete={toggleIncomplete}
+                maskColor={maskColor}
+              />
+            </div>
           </div>
         </div>
       </main>

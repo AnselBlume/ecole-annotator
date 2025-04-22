@@ -362,6 +362,7 @@ async def generate_mask_from_points(prompt: PointPrompt, request: Request):
         logger.info(f"Generate mask from points for image: {prompt.image_path}")
         logger.info(f"Positive points: {[(p.x, p.y) for p in prompt.positive_points]}")
         logger.info(f"Negative points: {[(p.x, p.y) for p in prompt.negative_points]}")
+        logger.info(f"Using mask color: {prompt.mask_color}")
 
         # Get user-specific identifier
         user_id = get_user_id(request)
@@ -382,7 +383,8 @@ async def generate_mask_from_points(prompt: PointPrompt, request: Request):
 
         return {
             "rle": rle_dict,
-            "score": float(best_score)
+            "score": float(best_score),
+            "mask_color": prompt.mask_color
         }
 
     except Exception as e:
@@ -403,6 +405,7 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
         # Log incoming request for debugging
         logger.info(f"Generate mask from polygon for image: {prompt.image_path}")
         logger.info(f"Polygon points: {[(p.x, p.y) for p in prompt.polygon_points]}")
+        logger.info(f"Using mask color: {prompt.mask_color}")
 
         # Get user-specific identifier
         user_id = get_user_id(request)
@@ -416,7 +419,8 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
         logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
 
         return {
-            "rle": rle_dict
+            "rle": rle_dict,
+            "mask_color": prompt.mask_color
         }
 
     except Exception as e:

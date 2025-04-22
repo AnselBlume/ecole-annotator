@@ -10,6 +10,7 @@ const ImageDisplay = ({
   onSkip,
   onSave,
   onStartAnnotation,
+  maskColor = 'aqua',
 }) => {
   const fileName = imageData?.image_path ? imageData.image_path.split('/').pop() : '';
   const showMask = activePart && imageData?.parts[activePart]?.rles?.length > 0;
@@ -30,7 +31,7 @@ const ImageDisplay = ({
       {showMask ? (
         <div className="relative">
           <img
-            src={apiService.getMaskImageUrl(imageData.image_path, activePart)}
+            src={apiService.getMaskImageUrl(imageData.image_path, activePart, maskColor)}
             alt="Selected mask"
             className="max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md"
             onError={(e) => {
@@ -60,7 +61,7 @@ const ImageDisplay = ({
                   tryAgainButton.addEventListener('click', () => {
                     // Force reload the image with a cache-busting parameter
                     const newImg = document.createElement('img');
-                    newImg.src = apiService.getMaskImageUrl(imageData.image_path, activePart, Date.now());
+                    newImg.src = apiService.getMaskImageUrl(imageData.image_path, activePart, maskColor, Date.now());
                     newImg.alt = "Selected mask";
                     newImg.className = "max-w-full max-h-[60vh] object-contain border-2 border-gray-200 rounded-lg shadow-md";
 
