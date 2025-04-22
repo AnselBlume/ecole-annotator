@@ -189,6 +189,10 @@ def rle_to_dict(rle_annotation) -> Dict[str, Any]:
     Convert an RLE annotation to a dictionary, handling different Pydantic versions
     and object types.
     """
+    # if someone’s already handed us a JSON‑style dict, just trust it
+    if isinstance(rle_annotation, dict):
+        return rle_annotation
+
     try:
         # Get basic attributes using different methods depending on the object type
         if hasattr(rle_annotation, "model_dump"):

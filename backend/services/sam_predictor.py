@@ -21,11 +21,14 @@ CACHE_ENTRY_TTL = 1800  # seconds (30 minutes)
 last_cache_cleanup = time.time()
 
 def get_user_id(request: Request) -> str:
-    """Get a consistent identifier for the current user session"""
-    # Use client's IP address + user agent as a simple user identifier
-    client_host = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("user-agent", "unknown")
-    return f"{client_host}:{user_agent}"
+    '''Get a consistent identifier for the current user session via cookie.
+
+    Raises if the cookie is missing.'''
+    sid = request.cookies.get("annotator_session")
+    if not sid:
+        # client didn’t send a session cookie—fail fast to debug
+        raise RuntimeError("Missing annotator_session cookie")
+    return sid
 
 def cleanup_old_cache_entries():
     """Remove stale cache entries to prevent memory leaks"""

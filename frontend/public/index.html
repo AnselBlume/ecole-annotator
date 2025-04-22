@@ -25,6 +25,55 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title>React App</title>
+
+    <!--
+      This script generates a random session ID and stores it in a cookie.
+      This is used to identify the annotator's session and to prevent duplicate annotations.
+    -->
+    <script>
+      (function(){
+        const cookieName = "annotator_session";
+        function getCookie(name) {
+          const m = document.cookie.match(
+            new RegExp('(?:^|; )' + name + '=([^;]*)')
+          );
+          return m ? decodeURIComponent(m[1]) : null;
+        }
+
+        // Always pick the _browser's_ crypto, never a polyfill.
+        const nativeCrypto = (window.crypto && window.crypto.getRandomValues)
+          ? window.crypto
+          : null;
+
+        // RFC‑4122 v4 fallback
+        function generateUUID() {
+          const buf = (nativeCrypto
+            ? nativeCrypto.getRandomValues(new Uint8Array(16))
+            : crypto.getRandomValues(new Uint8Array(16))
+          );
+          buf[6] = (buf[6] & 0x0f) | 0x40;
+          buf[8] = (buf[8] & 0x3f) | 0x80;
+          return [...buf].map((b,i) =>
+            ( [4,6,8,10].includes(i) ? "-" : "" )
+            + b.toString(16).padStart(2,"0")
+          ).join("");
+        }
+
+        let sid = getCookie(cookieName);
+        if (!sid) {
+          // Prefer the built‑in randomUUID if available
+          sid = (nativeCrypto && nativeCrypto.randomUUID)
+            ? nativeCrypto.randomUUID()
+            : generateUUID();
+            // DON’T use `; Secure` (that forces HTTPS)
+          // and omit SameSite=None (browsers require Secure then) since need to send the cookie to backend
+          document.cookie = `${cookieName}=${sid}; path=/; SameSite=Lax`;
+        }
+
+        console.log("Annotator session:", sid);
+      })();
+    </script>
+
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

@@ -109,6 +109,7 @@ export default function ModularAnnotationMode({
         headers: {
           "Content-Type": "application/json"
         },
+        credentials: "include", // Include session cookie
         body: JSON.stringify({
           image_path: imageData.image_path,
           part_name: activePart,
@@ -234,6 +235,7 @@ export default function ModularAnnotationMode({
         headers: {
           "Content-Type": "application/json"
         },
+        credentials: "include", // Include session cookie
         body: JSON.stringify({
           image_path: imageData.image_path,
           part_name: activePart,
@@ -381,6 +383,7 @@ export default function ModularAnnotationMode({
         const promptResult = await fetch(`${baseURL}/annotate/generate-mask-from-points`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include", // Include session cookie
           body: JSON.stringify(payload),
         });
 
