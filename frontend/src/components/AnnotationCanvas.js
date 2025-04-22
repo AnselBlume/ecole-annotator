@@ -67,8 +67,6 @@ export default function AnnotationCanvas({
 
     // Add error handling for image loading
     img.onerror = (error) => {
-      console.error(`Error loading image: ${imageUrl}`, error)
-
       // Draw error message on canvas
       if (canvas && ctx) {
         const width = canvas.width = 400
