@@ -23,18 +23,22 @@ def remove_path(annotations: dict, remove_img_path: str):
 
 if __name__ == '__main__':
     annotations_path = '/shared/nas2/blume5/sp25/annotator/data/annotations.json'
-    search_str = '3fadf803a31669d15c063bcce22e3793cf63fe5ca52ded1e66e6d3ebffd372e8.jpg'
+    search_strs = [
+        '58ff99b931544ffb3d699f65f487c73107ee36ca2819a8ca2bc12a63c55e0a1c.jpg',
+    ]
 
     backup_annotations(annotations_path)
 
     d = load_annotations(annotations_path)
 
-    paths = find_paths_containing_str(d, search_str)
-    print(f'There are {len(paths)} paths containing the image path: \n {pformat(paths)}')
+    for search_str in search_strs:
+        print(f'Searching for {search_str}')
+        paths = find_paths_containing_str(d, search_str)
+        print(f'There are {len(paths)} paths containing the image path: \n {pformat(paths)}')
 
-    for path in paths:
-        response = input(f'Remove {path}? (y/n): ')
-        if response.lower() == 'y':
-            remove_path(d, path)
+        for path in paths:
+            response = input(f'Remove {path} ? (y/n): ')
+            if response.lower() == 'y':
+                remove_path(d, path)
 
     save_annotations(d, annotations_path)
