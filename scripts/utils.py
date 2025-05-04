@@ -2,6 +2,23 @@ import os
 import shutil
 import time
 import orjson
+from collections import defaultdict
+
+def locate_str(search_str, annotations, match_case: bool = False):
+    matches = defaultdict(list)
+    if not match_case:
+        search_str = search_str.lower()
+
+    for key in ['checked', 'unchecked']:
+        subannots = annotations[key]
+        for k in subannots:
+            if not match_case:
+                k = k.lower()
+
+            if search_str in k:
+                matches[key].append(k)
+
+    return matches
 
 def backup_annotations(annotations_path: str, backup_dir: str = None):
     if backup_dir is None:
