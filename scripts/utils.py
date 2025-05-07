@@ -12,10 +12,8 @@ def locate_str(search_str, annotations, match_case: bool = False):
     for key in ['checked', 'unchecked']:
         subannots = annotations[key]
         for k in subannots:
-            if not match_case:
-                k = k.lower()
-
-            if search_str in k:
+            value = k if match_case else k.lower()
+            if search_str in value:
                 matches[key].append(k)
 
     return matches
