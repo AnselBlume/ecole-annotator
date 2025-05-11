@@ -62,13 +62,13 @@ def _sort_queue_by_concept(annotation_state: AnnotationState, n_to_interleave: i
     for img_annot in annotation_state.checked.values():
         labels_with_existing_annots.add(get_image_label(img_annot))
 
-    logger.info(f'Number of labels with existing annotations: {len(labels_with_existing_annots)}')
-    logger.info(f'Number of labels without existing annotations: {len(annotation_state.unchecked)}')
-
     image_annots = list(annotation_state.unchecked.values())
     label_to_annots = defaultdict(list)
     for img in image_annots:
         label_to_annots[get_image_label(img)].append(img)
+
+    logger.info(f'Number of labels with existing annotations: {len(labels_with_existing_annots)}')
+    logger.info(f'Number of labels without existing annotations: {len(set(label_to_annots) - labels_with_existing_annots)}')
 
     # Sort each label's annotations by the number of existing parts to try annotating high-value images first
     for label, annots in label_to_annots.items():
