@@ -17,6 +17,10 @@ import coloredlogs
 logger = logging.getLogger(__name__)
 coloredlogs.install(level='DEBUG', isatty=True)
 
+# Whether to interleave annotations by concept
+INTERLEAVE_ANNOTATIONS = True
+N_TO_INTERLEAVE_PER_LABEL = 1
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize SAM2 model on startup
@@ -27,7 +31,7 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing image queue...")
     annotation_state = load_annotation_state()
     save_annotation_state(annotation_state, to_file=False)
-    initialize_queue(annotation_state)
+    initialize_queue(annotation_state, sort_by_concept=INTERLEAVE_ANNOTATIONS, n_to_interleave=N_TO_INTERLEAVE_PER_LABEL)
 
     logger.info("Startup complete")
     yield

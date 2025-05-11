@@ -69,7 +69,7 @@ def load_annotation_state():
     img_paths_to_rle_dicts = annotations.img_paths_to_rle_dicts
     part_labels = set(annotations.part_labels)
 
-    # Need mapping from image label to obejct label to display on annotator interface
+    # Need mapping from image label to object label to display on annotator interface
     global _img_path_to_label, _object_label_to_parts
     _img_path_to_label = { # Mapping from image path to object label
         path : get_object_prefix(label)
