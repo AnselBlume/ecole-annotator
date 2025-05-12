@@ -122,9 +122,9 @@ def _handle_resize(image_data: ImageAnnotation):
         return image_data
 
     # Resize image and masks
-    logger.info(f"Resizing image of size {image.size}")
+    logger.debug(f"Resizing image of size {image.size}")
     resized_image = resize_image(image)
-    logger.info(f"Resized image has size {resized_image.size}")
+    logger.debug(f"Resized image has size {resized_image.size}")
     os.makedirs(os.path.join(DATA_DIR, 'resized_images'), exist_ok=True)
 
     # Generate new path. B64 encode original path as suffix to basename to avoid possible collisions
@@ -141,7 +141,7 @@ def _handle_resize(image_data: ImageAnnotation):
 
     # Resize masks
     total_rles = sum(len(part.get('rles', [])) for part in image_data['parts'].values())
-    logger.info(f"Starting to resize {total_rles} masks")
+    logger.debug(f"Starting to resize {total_rles} masks")
 
     rle_count = 0
     prog_bar = tqdm(range(total_rles), desc="Resizing masks")
@@ -158,10 +158,10 @@ def _handle_resize(image_data: ImageAnnotation):
             except Exception as e:
                 logger.error(f"Error resizing mask for part {part_name}, index {i}: {e}")
 
-    logger.info(f'Completed resizing all {rle_count} masks')
+    logger.debug(f'Completed resizing all {rle_count} masks')
 
     # Save updated image data to Redis
-    logger.info(f'Saving image data to Redis')
+    logger.debug(f'Saving image data to Redis')
     try:
         annotation_state_lock = acquire_annotation_state_lock()
         if not annotation_state_lock:

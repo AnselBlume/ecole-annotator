@@ -359,14 +359,14 @@ async def generate_mask_from_points(prompt: PointPrompt, request: Request):
     """
     try:
         # Log incoming request for debugging
-        logger.info(f"Generate mask from points for image: {prompt.image_path}")
-        logger.info(f"Positive points: {[(p.x, p.y) for p in prompt.positive_points]}")
-        logger.info(f"Negative points: {[(p.x, p.y) for p in prompt.negative_points]}")
-        logger.info(f"Using mask color: {prompt.mask_color}")
+        logger.debug(f"Generate mask from points for image: {prompt.image_path}")
+        logger.debug(f"Positive points: {[(p.x, p.y) for p in prompt.positive_points]}")
+        logger.debug(f"Negative points: {[(p.x, p.y) for p in prompt.negative_points]}")
+        logger.debug(f"Using mask color: {prompt.mask_color}")
 
         # Get user-specific identifier
         user_id = get_user_id(request)
-        logger.info(f"Processing request for user: {user_id}")
+        logger.debug(f"Processing request for user: {user_id}")
 
         # Process the point prompt to get a mask
         best_mask, best_score, _ = process_point_prompt(
@@ -403,20 +403,20 @@ async def generate_mask_from_polygon(prompt: PolygonPrompt, request: Request):
     """
     try:
         # Log incoming request for debugging
-        logger.info(f"Generate mask from polygon for image: {prompt.image_path}")
-        logger.info(f"Polygon points: {[(p.x, p.y) for p in prompt.polygon_points]}")
-        logger.info(f"Using mask color: {prompt.mask_color}")
+        logger.debug(f"Generate mask from polygon for image: {prompt.image_path}")
+        logger.debug(f"Polygon points: {[(p.x, p.y) for p in prompt.polygon_points]}")
+        logger.debug(f"Using mask color: {prompt.mask_color}")
 
         # Get user-specific identifier
         user_id = get_user_id(request)
-        logger.info(f"Processing polygon request for user: {user_id}")
+        logger.debug(f"Processing polygon request for user: {user_id}")
 
         # Process the polygon to get a mask
         mask = process_polygon_prompt(prompt.image_path, user_id, prompt.polygon_points)
 
         # Convert mask to RLE format
         rle_dict = create_rle_from_mask(mask, prompt.image_path)
-        logger.info(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
+        logger.debug(f"Generated valid RLE dict with keys: {list(rle_dict.keys())}")
 
         return {
             "rle": rle_dict,
