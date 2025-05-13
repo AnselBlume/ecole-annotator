@@ -1,5 +1,6 @@
 from model import AnnotationState, ImageAnnotation
 from services.redis_client import r, acquire_lock
+import heapq
 import json
 from typing import Any, Optional
 from services.annotator import image_path_to_label, get_object_prefix
@@ -37,80 +38,100 @@ def acquire_image_queue_lock() -> Optional[Any]:
     '''
     return acquire_lock(IMAGE_QUEUE_LOCK_KEY)
 
-def _sort_queue_by_concept(annotation_state: AnnotationState, n_to_interleave: int) -> list[ImageAnnotation]:
-    '''
-    Interleaves the unchecked annotations by concept, where concepts with existing annotations are annotated last.
-    Annotations are sorted by the number of existing parts to try annotating high-value images first.
+def _sort_queue_by_concept(
+    annotation_state: AnnotationState,
+    n_to_interleave: int
+) -> list[ImageAnnotation]:
+    """
+    Order unchecked annotations so that, while the user is annotating, the
+    cumulative number of *checked* images for every label stays as equal as
+    possible.
 
     Args:
-        annotation_state: The annotation state to sort
-        n_to_interleave: The number of annotations of each label before switching to the next label
+        annotation_state:  current annotation state
+        n_to_interleave:   how many consecutive images of the same label to emit
+                           each time that label is chosen (usually 1)
 
     Returns:
-        A list of interleaved annotations
-    '''
+        A list of ImageAnnotation objects in the order they should be shown.
+    """
+    # --- helper to determine a label for any image --------------------------
     def get_image_label(img_annot: ImageAnnotation) -> str:
         try:
             return image_path_to_label(img_annot.image_path)
         except ValueError:
-            extracted_label = get_object_prefix(next(iter(img_annot.parts.values())).name)
-            logger.debug(f'Failed to get label for image {img_annot.image_path} from path; extracted from part name: {extracted_label}')
-            return extracted_label
+            return get_object_prefix(next(iter(img_annot.parts.values())).name)
 
-    # Labels with existing annotations should be annotated last
-    labels_with_existing_annots = set()
-    for img_annot in annotation_state.checked.values():
-        labels_with_existing_annots.add(get_image_label(img_annot))
+    # --- build {label: [unchecked images]} ----------------------------------
+    unchecked_by_label: dict[str, list[ImageAnnotation]] = defaultdict(list)
+    for img in annotation_state.unchecked.values():
+        unchecked_by_label[get_image_label(img)].append(img)
 
-    image_annots = list(annotation_state.unchecked.values())
-    label_to_annots = defaultdict(list)
-    for img in image_annots:
-        label_to_annots[get_image_label(img)].append(img)
-
-    logger.info(f'Number of labels with existing annotations: {len(labels_with_existing_annots)}')
-    logger.info(f'Number of labels without existing annotations: {len(set(label_to_annots) - labels_with_existing_annots)}')
-
-    # Sort each label's annotations by the number of existing parts to try annotating high-value images first
-    for label, annots in label_to_annots.items():
+    # sort each label’s images (high‑value first, as before)
+    for annots in unchecked_by_label.values():
         annots.sort(key=lambda x: len(x.parts), reverse=True)
 
-    # Interleave the sorted annotations
-    label_without_annots_to_annots = {l : a for l, a in label_to_annots.items() if l not in labels_with_existing_annots}
-    interleaved = _interleave_annots(label_without_annots_to_annots, n_to_interleave)
+    # --- count already‑checked ------------------------------------------------
+    checked_count: dict[str, int] = defaultdict(int)
+    for img in annotation_state.checked.values():
+        checked_count[get_image_label(img)] += 1
 
-    label_with_annots_to_annots = {l : a for l, a in label_to_annots.items() if l in labels_with_existing_annots}
-    interleaved.extend(_interleave_annots(label_with_annots_to_annots, n_to_interleave))
+    # --- produce balanced queue ---------------------------------------------
+    return _interleave_to_balance_checked_counts(
+        unchecked_by_label,
+        checked_count,
+        n_to_interleave
+    )
 
-    return interleaved
-
-def _interleave_annots(annots_by_label: dict[str, list[ImageAnnotation]], n_to_interleave: int) -> list[ImageAnnotation]:
-    '''
-    Interleave the annotations from the given dictionary of annotations by label.
-    Continues until all annotations from all labels have been interleaved.
+def _interleave_to_balance_checked_counts(
+    unchecked_by_label: dict[str, list[ImageAnnotation]],
+    checked_count: dict[str, int],
+    n_to_interleave: int
+) -> list[ImageAnnotation]:
+    """
+    Always pop the label with the *lowest* current total (checked + already
+    queued) so that totals stay as even as possible.
 
     Args:
-        annots_by_label: A dictionary mapping labels to lists of annotations
-        n_to_interleave: The number of annotations of each label before switching to the next label
+        unchecked_by_label: {label: remaining unchecked images}
+        checked_count:      {label: how many have already been checked}
+        n_to_interleave:    images to emit per pop
 
     Returns:
-        A list of interleaved annotations
-    '''
-    interleaved = []
+        Ordered list of ImageAnnotation objects
+    """
+    # running totals = checked already + how many we have queued so far
+    running_total = checked_count.copy()
+    queued_count: dict[str, int] = defaultdict(int)
 
-    while len(annots_by_label) > 0: # There are still labels to interleave
-        labels_to_remove = []
+    # min‑heap keyed by (current_total, label)
+    heap: list[tuple[int, str]] = [
+        (running_total.get(lbl, 0), lbl) for lbl in unchecked_by_label
+    ]
+    heapq.heapify(heap)
 
-        for label, annots in annots_by_label.items():
-            if len(annots) == 0: # No more annotations for this label
-                labels_to_remove.append(label)
-                continue
+    if heap:
+        count, label = heap[0]
+        logger.info(f'Label with minimum number of annotations: {label}: ({count})')
+    else:
+        logger.info('No labels found in unchecked_by_label.')
 
-            # Pop the next n_to_interleave annotations for this label
-            n_to_pop = min(n_to_interleave, len(annots))
-            for _ in range(n_to_pop):
-                interleaved.append(annots.pop(0))
+    ordered: list[ImageAnnotation] = []
 
-        for label in labels_to_remove:
-            del annots_by_label[label]
+    while heap:
+        current_total, lbl = heapq.heappop(heap)
+        images = unchecked_by_label[lbl]
 
-    return interleaved
+        # take up to n_to_interleave images
+        take = min(n_to_interleave, len(images))
+        ordered.extend(images[:take])
+        del images[:take]
+
+        queued_count[lbl] += take
+        running_total[lbl] = checked_count.get(lbl, 0) + queued_count[lbl]
+
+        # if that label still has images left, push it back with new total
+        if images:
+            heapq.heappush(heap, (running_total[lbl], lbl))
+
+    return ordered
