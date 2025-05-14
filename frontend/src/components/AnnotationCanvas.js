@@ -1,9 +1,9 @@
 import { useRef, useEffect, useState } from "react"
 import { Button } from "./ui/button"
 
-const POINT_RADIUS = 3
-const POINT_HIGHLIGHT_RADIUS = 3
-const CLICK_TOLERANCE = 5
+const POINT_RADIUS = 2
+const POINT_HIGHLIGHT_RADIUS = 2
+const CLICK_TOLERANCE = 2
 
 export default function AnnotationCanvas({
   imageUrl,
