@@ -113,6 +113,16 @@ def _interleave_to_balance_checked_counts(
     if heap:
         count, label = heap[0]
         logger.info(f'Label with minimum number of annotations: {label}: ({count})')
+
+        num_to_next_count = 0
+        for next_count, label in heap[1:]:
+            if next_count == count:
+                num_to_next_count += 1
+            else:
+                break
+
+        logger.info(f'Number of labels with the same number of annotations: {num_to_next_count}')
+
     else:
         logger.info('No labels found in unchecked_by_label.')
 
