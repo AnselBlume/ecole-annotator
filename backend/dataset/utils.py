@@ -1,3 +1,4 @@
+SEP = '--'
 PART_SEP = '--part:'
 
 def is_part_name(label: str) -> bool:
@@ -11,8 +12,11 @@ def get_part_suffix(label: str, safe: bool = False) -> str:
 def get_object_prefix(label: str) -> str:
     return label.split(PART_SEP)[0]
 
-def get_category_name(label: str):
-    return label.split('--')[0]
+def get_object_name(label: str) -> str:
+    return label.split(SEP)[1]
 
-def join_object_and_part(object_name: str, part_name: str) -> str:
-    return f'{object_name}{PART_SEP}{part_name}'
+def get_category_name(label: str):
+    return label.split(SEP)[0]
+
+def join_object_and_part(object_prefix: str, part_name: str) -> str:
+    return f'{object_prefix}{PART_SEP}{part_name}'
