@@ -6,6 +6,7 @@ import orjson
 from tqdm import tqdm
 from collections import defaultdict
 from pprint import pformat
+from utils import backup_annotations, load_annotations, save_annotations
 
 def remove_part_from_dict(paths_dict: dict, parts_to_remove: set[str]):
     n_removed = defaultdict(int)
@@ -20,18 +21,17 @@ def remove_part_from_dict(paths_dict: dict, parts_to_remove: set[str]):
 
 if __name__ == "__main__":
     annots_file = '/shared/nas2/blume5/sp25/annotator/data/annotations.json'
-    out_path = '/shared/nas2/blume5/sp25/annotator/data/annotations-part-removed.json'
+
     parts_to_remove = {
-        'boats--airboat--part:stern plate'
+        'boats--submarine--part:conning tower'
     }
 
-    with open(annots_file, "rb") as f:
-        annots = orjson.loads(f.read())
+    backup_annotations(annots_file)
+    annots = load_annotations(annots_file)
 
     for key in ['checked', 'unchecked']:
         paths_dict = annots[key]
         n_removed = remove_part_from_dict(paths_dict, parts_to_remove)
         print(f'Removed from {key}: {pformat(n_removed)}')
 
-    with open(out_path, "wb") as f:
-        f.write(orjson.dumps(annots, option=orjson.OPT_INDENT_2))
+    save_annotations(annots, annots_file)

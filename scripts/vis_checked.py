@@ -27,8 +27,7 @@ def visualize_checked_parts(annotations: Dict, output_base: str):
         # Create directory structure: output_base/object_type/image_id
         object_type = get_object_prefix(next(iter(data['parts'])))
         image_dir = os.path.join(output_base, object_type, image_id)
-        os.makedirs(image_dir)
-
+        os.makedirs(image_dir, exist_ok=True)
 
         for part_name, part_data in data['parts'].items():
             masks = []
