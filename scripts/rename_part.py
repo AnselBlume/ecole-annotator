@@ -95,7 +95,7 @@ def rename_part(annotations: dict, query: str, new_part_name: str, strategy: Mat
                     renamed_part_name = map_to_new_name(query, part_name, new_part_name, renaming_strategy)
 
                     if part_name not in n_renamed_by_part:
-                        logger.debug(f"Renaming {part_name} ---> {renamed_part_name}")
+                        logger.debug(f"Renaming {part_name} --> {renamed_part_name}")
 
                     part_data['name'] = renamed_part_name
 
@@ -144,8 +144,8 @@ if __name__ == "__main__":
     # Rename parts
     renamed_stats, renamed_stats_by_part = rename_part(annotations, args.query, args.new_part_name, args.match_strategy, args.renaming_strategy)
     logger.info(f"Renamed parts using query '{args.query}' to '{args.new_part_name}':")
-    logger.info(pformat(renamed_stats))
-    logger.info(pformat(renamed_stats_by_part))
+    logger.info(f'Renamed by status: {pformat(renamed_stats)}')
+    logger.info(f'Renamed by part: {pformat(renamed_stats_by_part)}')
 
     # Save the annotations
     out_path = args.out_path or args.annotations_path
