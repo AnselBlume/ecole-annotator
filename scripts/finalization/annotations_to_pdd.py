@@ -12,14 +12,13 @@ import yaml
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tqdm import tqdm
-from typing import Any
+from typing import Any, Literal
 import sys
 sys.path.append('/shared/nas2/blume5/sp25/annotator/backend') # To allow its imports to work
 from backend.dataset.utils import (
     get_object_prefix,
     get_category_name,
     get_object_name,
-    join_object_and_part,
     get_part_suffix,
 )
 from backend.model import ImageAnnotation
@@ -257,33 +256,39 @@ def get_concepts(annotations: list[ImageAnnotation]) -> tuple[list[Concept], lis
 def compute_stats(annotations: list[ImageAnnotation]) -> dict[str, Any]:
     object_concepts, part_concepts = get_concepts(annotations)
 
-    print(f'Number of annotations: {len(annotations)}')
+    logger.info(f'Number of annotations: {len(annotations)}')
+    logger.info(f'Number of images: {len(set(ann.image_path for ann in annotations))}')
 
     # Count absolute number of object, part names
-    print(f'Number of object names: {len(object_concepts)}')
-    print(f'Number of part names: {len(part_concepts)}')
+    logger.info(f'Number of object names: {len(object_concepts)}')
+    logger.info(f'Number of part names: {len(part_concepts)}')
 
     # Normalize object, part names and recount
     unique_objects, duplicated_objects = get_unique_objects(object_concepts)
     unique_parts, duplicated_parts = get_unique_parts(part_concepts)
 
-    print(f'Number of normalized object names: {len(unique_objects)}')
-    print(f'Number of normalized part names: {len(unique_parts)}')
+    logger.info(f'Number of normalized object names: {len(unique_objects)}')
+    logger.info(f'Number of normalized part names: {len(unique_parts)}')
 
-    print(f'Duplicated object names:\n{pformat(duplicated_objects)}')
-    print(f'Duplicated part names:\n{pformat(duplicated_parts)}')
-
-    print('')
+    logger.debug(f'Duplicated object names:\n{pformat(duplicated_objects)}')
+    logger.debug(f'Duplicated part names:\n{pformat(duplicated_parts)}')
 
     # Compute number of parts with annotations
-    parts_with_annotations = set()
+    n_annotations_per_part = defaultdict(int)
+    n_images_per_part = defaultdict(int)
     for ann in annotations:
         for part_name, part_annot in ann.parts.items():
-            if part_annot.rles:
-                parts_with_annotations.add(part_name)
+            assert part_annot.rles, f'Part {part_name} of {ann.image_path} has no annotations'
+            n_annotations_per_part[part_name] += len(part_annot.rles)
+            n_images_per_part[part_name] += 1
 
-    num_parts_with_annotations = len(parts_with_annotations)
-    print(f'Number of parts with annotations: {num_parts_with_annotations}')
+    logger.info(f'Number of total masks: {sum(n_annotations_per_part.values())}')
+    logger.info(f'Minimum masks per part: {min(n_annotations_per_part.values())}')
+    logger.info(f'Maximum masks per part: {max(n_annotations_per_part.values())}')
+
+    logger.info(f'Number of unioned part annotations: {sum(n_images_per_part.values())}')
+    logger.info(f'Minimum images per part: {min(n_images_per_part.values())}')
+    logger.info(f'Maximum images per part: {max(n_images_per_part.values())}')
 
     # Count the number of masks in the PartDatasetDescriptor
     # The below code is correct, but it was written for loading the PDD from JSON
@@ -303,36 +308,93 @@ def compute_stats(annotations: list[ImageAnnotation]) -> dict[str, Any]:
     #     parts.update(instance['segmentations'])
     # print(f'Number of parts: {len(parts)}')
 
-def get_balanced_annotations(annotations: list[ImageAnnotation], exclude_objects: set[str]) -> list[ImageAnnotation]:
+def get_balanced_annotations(
+    annotations: list[ImageAnnotation],
+    exclude_objects: set[str],
+    selection_strategy: Literal['max_part_annots', 'max_unique_parts']
+) -> list[ImageAnnotation]:
+
     label_to_annots: dict[str, list[ImageAnnotation]] = defaultdict(list)
+    label_to_paths: dict[str, set[str]] = defaultdict(set)
     for ann in annotations:
         for part_name, part_annot in ann.parts.items():
-            if part_annot.rles:
-                object_prefix = get_object_prefix(part_name)
-                if object_prefix not in exclude_objects:
-                    label_to_annots[object_prefix].append(ann)
+            assert part_annot.rles # Each part should have at least one annotation
 
-    # Sort in descending order of number of part annotations
-    # Images can have parts with no annotations, so we filter them out when counting
-    for label, annots in label_to_annots.items():
-        annots.sort(key=lambda x: len([
-            p for p in x.parts.values()
-            if p.rles and get_object_prefix(p.name) == label
-        ]), reverse=True)
+            object_prefix = get_object_prefix(part_name)
+
+            # If we're not excluding the object and haven't used the image for this object before
+            if object_prefix not in exclude_objects and ann.image_path not in label_to_paths[object_prefix]:
+                label_to_annots[object_prefix].append(ann)
+                label_to_paths[object_prefix].add(ann.image_path)
 
     # Compute minimum number of annotations for an object
     min_count = min(len(annots) for annots in label_to_annots.values())
-    print(f'Minimum number of annotations for an object: {min_count}')
+    logger.info(f'Minimum number of annotations for an object: {min_count}')
 
     # Sort labels by number of annotations and print the counts
-    print(f'Counts:')
+    logger.debug(f'Counts:')
     for label, annots in sorted(label_to_annots.items(), key=lambda x: len(x[1]), reverse=True):
-        print(f'{label}: {len(annots)}')
+        logger.debug(f'{label}: {len(annots)}')
 
-    # Select the minimum number of annotations for each object
+    def restrict_parts_to_object(annot: ImageAnnotation, object_label: str) -> ImageAnnotation:
+        annot = annot.model_copy(deep=True)
+        annot.parts = {
+            part_name: part_annot
+            for part_name, part_annot in annot.parts.items()
+            if get_object_prefix(part_name) == object_label
+        }
+
+        return annot
+
     balanced_annots = []
-    for label, annots in label_to_annots.items():
-        balanced_annots.extend(annots[:min_count])
+
+    if selection_strategy == 'max_part_annots':
+        # Select the ImageAnnotations such that we maximize the number of part annotations
+        # Sort in descending order of number of part annotations
+        # Images can have parts with no annotations, so we filter them out when counting
+        for label, annots in label_to_annots.items():
+            annots.sort(key=lambda x: len([
+                p for p in x.parts.values()
+                if get_object_prefix(p.name) == label # An image can have parts for multiple objects
+            ]), reverse=True)
+
+        for label, annots in label_to_annots.items():
+            # Create ImageAnnotations with only the part annotations corresponding to this object
+            for selected_annot in annots[:min_count]:
+                balanced_annots.append(restrict_parts_to_object(selected_annot, label))
+
+    elif selection_strategy == 'max_unique_parts':
+        for label, annots in label_to_annots.items():
+            # Build list of (annot, part suffix) pairs
+            candidates = []
+            for annot in annots:
+                suffixes = {
+                    get_part_suffix(part_name)
+                    for part_name in annot.parts
+                    if get_object_prefix(part_name) == label
+                }
+                candidates.append((annot, suffixes))
+
+            covered: set[str] = set()
+            selected: list[ImageAnnotation] = []
+
+            # Greedy max-coverage loop
+            for _ in range(min_count):
+                # Pick candidate that adds the most new parts
+                best_idx, (best_annot, best_suffixes) = max(
+                    enumerate(candidates),
+                    key=lambda enum_pair: len(enum_pair[1][1] - covered)
+                )
+                selected.append(best_annot)
+                covered |= best_suffixes
+                candidates.pop(best_idx)
+
+            # Select part annotations corresponding only to this object
+            for annot in selected:
+                balanced_annots.append(restrict_parts_to_object(annot, label))
+
+    else:
+        raise ValueError(f'Invalid selection strategy: {selection_strategy}')
 
     return balanced_annots
 
@@ -347,6 +409,7 @@ if __name__ == '__main__':
     }
 
     balance_annotations = True
+    selection_strategy = 'max_unique_parts'
 
     # Load annotations
     with open(annotations_file, 'rb') as f:
@@ -355,8 +418,18 @@ if __name__ == '__main__':
     checked: dict[str, ImageAnnotation] = annotations['checked']
     annots = [ImageAnnotation.model_validate(annot) for annot in checked.values()]
 
+    # Filter out parts with no annotations
+    for annot in annots:
+        for part_name, part_annot in list(annot.parts.items()):
+            if not part_annot.rles:
+                del annot.parts[part_name]
+
+    filtered_annots = [annot for annot in annots if len(annot.parts) > 0] # Each annotation should have at least one part
+    logger.info(f'Removed {len(annots) - len(filtered_annots)} annotations with no parts')
+    annots = filtered_annots
+
     if balance_annotations:
-        annots = get_balanced_annotations(annots, exclude_objects)
+        annots = get_balanced_annotations(annots, exclude_objects, selection_strategy)
 
     # Build PartDatasetDescriptor
     logger.info('Building PDD')
