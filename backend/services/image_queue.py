@@ -111,17 +111,14 @@ def _interleave_to_balance_checked_counts(
     heapq.heapify(heap)
 
     if heap:
-        count, label = heap[0]
-        logger.info(f'Label with minimum number of annotations: {label}: ({count})')
+        min_total = heap[0][0]
+        labels_at_min = [lbl for total, lbl in heap if total == min_total]
+        images_needed = len(labels_at_min)          # one per label
 
-        num_to_next_count = 0
-        for next_count, label in heap[1:]:
-            if next_count == count:
-                num_to_next_count += 1
-            else:
-                break
-
-        logger.info(f'Number of labels with the same number of annotations: {num_to_next_count}')
+        logger.info(
+            "Labels at min: %s — need %d image(s) total to raise global min to %d",
+            labels_at_min, images_needed, min_total + 1
+        )
 
     else:
         logger.info('No labels found in unchecked_by_label.')
