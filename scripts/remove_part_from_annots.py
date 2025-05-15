@@ -23,15 +23,22 @@ if __name__ == "__main__":
     annots_file = '/shared/nas2/blume5/sp25/annotator/data/annotations.json'
 
     parts_to_remove = {
-        'boats--submarine--part:conning tower'
+        'geography--plateau--part:intermontane plateau'
     }
 
     backup_annotations(annots_file)
     annots = load_annotations(annots_file)
 
+    # Add excluded parts to annotations
+    if 'excluded_parts' not in annots:
+        annots['excluded_parts'] = []
+
     for key in ['checked', 'unchecked']:
         paths_dict = annots[key]
         n_removed = remove_part_from_dict(paths_dict, parts_to_remove)
         print(f'Removed from {key}: {pformat(n_removed)}')
+
+        # Add removed parts to excluded parts list so they aren't added back later
+        annots['excluded_parts'].extend(n_removed.keys())
 
     save_annotations(annots, annots_file)

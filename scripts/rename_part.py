@@ -59,10 +59,20 @@ def map_to_new_name(query: str, old_part_name: str, new_part_name: str, strategy
     if strategy == 'full_replace':
         return new_part_name
     elif strategy == 'part_suffix_replace':
+        if '--part:' in new_part_name:
+            raise ValueError(
+                "For part_suffix_replace, --new_part_name should be a suffix only "
+                f"(got '{new_part_name}')"
+            )
         return join_object_and_part(get_object_prefix(old_part_name), new_part_name)
     elif strategy == 'substring_replace':
         return old_part_name.replace(query, new_part_name)
     elif strategy == 'part_suffix_substring_replace':
+        if '--part:' in new_part_name:
+            raise ValueError(
+                "For part_suffix_substring_replace, --new_part_name should be a suffix only "
+                f"(got '{new_part_name}')"
+            )
         return join_object_and_part(get_object_prefix(old_part_name), old_part_name.replace(query, new_part_name))
     elif strategy == 'append':
         return f'{old_part_name}{new_part_name}'
@@ -146,6 +156,12 @@ if __name__ == "__main__":
     logger.info(f"Renamed parts using query '{args.query}' to '{args.new_part_name}':")
     logger.info(f'Renamed by status: {pformat(renamed_stats)}')
     logger.info(f'Renamed by part: {pformat(renamed_stats_by_part)}')
+
+    # Add renamed parts to excluded parts list so they aren't added back later
+    if 'excluded_parts' not in annotations:
+        annotations['excluded_parts'] = []
+
+    annotations['excluded_parts'].extend(list(renamed_stats_by_part.keys()))
 
     # Save the annotations
     out_path = args.out_path or args.annotations_path

@@ -49,7 +49,7 @@ def visualize_checked_parts(annotations: Dict, output_base: str):
                 superimpose_alpha=0.8
             )
 
-            part_suffix = get_part_suffix(part_name)
+            part_suffix = get_part_suffix(part_name).replace(os.path.sep, '_') # Replace slashes with underscores
             output_path = os.path.join(image_dir, f"{part_suffix}.jpg")
             visual.save(output_path)
             logger.debug(f"Saved: {output_path}")

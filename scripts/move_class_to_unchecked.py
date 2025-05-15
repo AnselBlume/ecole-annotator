@@ -12,11 +12,10 @@ def move_class_to_unchecked(annotations: dict, class_name: str) -> dict:
         logger.info(f'Processing {k} images')
 
         for path, img_dict in tqdm(annotations[k].items()):
-            first_part_name = next(iter(img_dict['parts']))
-            object_class = get_object_prefix(first_part_name)
-
-            if object_class == class_name:
-                img_paths.append(path)
+            for part in img_dict['parts']:
+                if get_object_prefix(part) == class_name:
+                    img_paths.append(path)
+                    break
 
     logger.info(f'Moving {len(img_paths)} images to unchecked')
     for path in tqdm(img_paths):
@@ -28,7 +27,7 @@ if __name__ == '__main__':
     coloredlogs.install(level='INFO')
 
     annotations_path = '/shared/nas2/blume5/sp25/annotator/data/annotations.json'
-    class_name = 'boats--pontoon'
+    class_name = 'geography--plateau'
 
     backup_annotations(annotations_path)
 
