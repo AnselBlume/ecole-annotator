@@ -25,6 +25,7 @@ IMAGE_LOCK_PREFIX = 'lock:'
 
 _img_path_to_label = None
 _object_label_to_parts = None
+_excluded_parts = None
 
 class AnnotationStateError(Exception):
     '''Exception raised when there's an issue with the annotation state.'''
@@ -87,9 +88,8 @@ def load_annotation_state():
                 annotation_state = AnnotationState.model_validate(annotation_state_data)
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning(f'Error loading existing annotations: {e}. Starting fresh.')
-                annotation_state = AnnotationState(checked={}, unchecked={})
+                annotation_state = AnnotationState(excluded_parts=[], checked={}, unchecked={})
     else: # No existing annotations
-        checked = {}
         unchecked = {}
         for img_path, label_to_rle_dicts in img_paths_to_rle_dicts.items():
             for label, rle_dicts in label_to_rle_dicts.items():
@@ -97,7 +97,10 @@ def load_annotation_state():
                     annot: ImageAnnotation = unchecked.setdefault(img_path, ImageAnnotation(image_path=img_path, parts={}))
                     annot.parts[label] = PartAnnotation(name=label, rles=rle_dicts)
 
-        annotation_state = AnnotationState(checked=checked, unchecked=unchecked)
+        annotation_state = AnnotationState(excluded_parts=[], checked={}, unchecked=unchecked)
+
+    global _excluded_parts
+    _excluded_parts = annotation_state.excluded_parts
 
     return annotation_state
 
@@ -149,3 +152,6 @@ def object_label_to_parts(object_label: str) -> list[str]:
         return _object_label_to_parts[object_label]
     except KeyError:
         raise ValueError(f'Object label {object_label} not found in _object_label_to_parts')
+
+def is_part_excluded(part_name: str) -> bool:
+    return part_name in _excluded_parts

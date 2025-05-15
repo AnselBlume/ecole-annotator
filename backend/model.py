@@ -23,6 +23,9 @@ class AnnotationState(BaseModel):
     checked: dict[str, ImageAnnotation]
     unchecked: dict[str, ImageAnnotation]
 
+    excluded_parts: list[str] = []
+    excluded_objects: list[str] = []
+
 class ImageQualityUpdate(BaseModel):
     image_path: str
     is_complete: bool = None

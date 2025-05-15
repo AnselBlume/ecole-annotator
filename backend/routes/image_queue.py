@@ -12,7 +12,8 @@ from services.annotator import (
     acquire_annotation_state_lock,
     acquire_image_lock,
     save_annotation_state,
-    image_path_to_part_labels
+    image_path_to_part_labels,
+    is_part_excluded
 )
 from utils.image_utils import needs_resize, resize_image, resize_rle
 from services.redis_client import r, release_lock, LockAcquisitionError
@@ -85,7 +86,7 @@ def get_next_image():
 
                         # Add missing parts with empty RLEs
                         for part_name in all_possible_parts:
-                            if part_name not in image_data['parts']:
+                            if part_name not in image_data['parts'] and not is_part_excluded(part_name):
                                 # Add placeholder for part with no existing annotations
                                 image_data['parts'][part_name] = {
                                     'name': part_name,
